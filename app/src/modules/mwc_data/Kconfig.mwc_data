@@ -1,0 +1,13 @@
+menuconfig APP_MWC_DATA
+	bool "MWC Data module"
+	default y
+	select ZBUS
+	select SMF
+
+if APP_MWC_DATA
+
+module = APP_MWC_DATA
+module-str = MWC Data
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # APP_MWC_DATA 

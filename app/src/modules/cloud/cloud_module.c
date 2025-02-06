@@ -9,8 +9,7 @@
 #include <zephyr/zbus/zbus.h>
 #include <zephyr/smf.h>
 #include <zephyr/task_wdt/task_wdt.h>
-#include <net/nrf_cloud.h>
-#include <net/nrf_cloud_coap.h>
+#include <zephyr/net/socket.h>
 #include <app_version.h>
 
 #if defined(CONFIG_MEMFAULT)
@@ -126,6 +125,68 @@ static void state_connected_ready_run(void *o);
 static void state_connected_paused_entry(void *o);
 static void state_connected_paused_run(void *o);
 
+static struct sockaddr_in host_addr;
+static struct sockaddr_in local_addr;
+static int client_fd;
+
+/* Add UDP socket definitions */
+#define SERVER_PORT CONFIG_APP_CLOUD_SERVER_PORT  // Standard CoAP port from Kconfig
+#define SERVER_ADDR CONFIG_APP_CLOUD_SERVER_ADDR      // Cloud server address from Kconfig
+static int sock_fd = -1;
+
+static int udp_init(void)
+{
+	int err=0;
+	inet_pton(AF_INET, SERVER_ADDR,
+		  &host_addr.sin_addr);
+	host_addr.sin_port = htons(SERVER_PORT);
+	host_addr.sin_family = AF_INET;
+	local_addr.sin_family = AF_INET;
+	local_addr.sin_port = htons(0);
+	local_addr.sin_addr.s_addr = 0;
+	//LOG_DBG("IPv4 Address %s", log_strdup(SERVER_ADDR));
+	return err;
+}
+
+static int udp_connect(const char *version)
+{
+	int err;
+	client_fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (client_fd < 0) {
+		LOG_ERR("client_fd: %d\n\r", client_fd);
+		return client_fd;
+	}
+	err = bind(client_fd, (struct sockaddr *)&local_addr,
+		   sizeof(local_addr));
+	if (err < 0) {
+		LOG_ERR("bind err: %d errno: %d\n\r", err, errno);
+		return err;
+	}
+	err = connect(client_fd, (struct sockaddr *)&host_addr,
+		      sizeof(host_addr));
+	if (err < 0) {
+		LOG_ERR("connect err: %d errno: %d\n\r", err, errno);
+		return err;
+	}
+	//udp_backend_ping();
+	return err;
+}
+
+static int udp_send(const char *data, size_t len)
+{
+	if (client_fd < 0) {
+		return -ENOTCONN;
+	}
+
+	ssize_t sent = send(client_fd, data, len, 0);
+	if (sent < 0) {
+		LOG_ERR("Failed to send data");
+		return -1;
+	}
+
+	return 0;
+}
+
 /* Defining the hierarchical cloud  module states:
  *
  *   STATE_RUNNING: The cloud  module has started and is running
@@ -229,28 +290,17 @@ static void task_wdt_callback(int channel_id, void *user_data)
 static void connect_to_cloud(void)
 {
 	int err;
-	char buf[NRF_CLOUD_CLIENT_ID_MAX_LEN];
 
-	err = nrf_cloud_client_id_get(buf, sizeof(buf));
-	if (err == 0) {
-		LOG_INF("Connecting to nRF Cloud CoAP with client ID: %s", buf);
-	} else {
-		LOG_ERR("nrf_cloud_client_id_get, error: %d, cannot continue", err);
+	LOG_INF("Connecting to UDP server at %s:%d", SERVER_ADDR, SERVER_PORT);
 
-		SEND_FATAL_ERROR();
-		return;
-	}
-
-	err = nrf_cloud_coap_connect(APP_VERSION_STRING);
+	err = udp_connect(APP_VERSION_STRING);
 	if (err == 0) {
 		STATE_SET(cloud_state, STATE_CONNECTED);
-
 		return;
 	}
 
 	/* Connection failed, retry */
-	LOG_ERR("nrf_cloud_coap_connect, error: %d", err);
-
+	LOG_ERR("UDP connect failed, error: %d", err);
 	STATE_SET(cloud_state, STATE_CONNECTING_BACKOFF);
 }
 
@@ -300,11 +350,10 @@ static void state_running_entry(void *o)
 
 	LOG_DBG("%s", __func__);
 
-	err = nrf_cloud_coap_init();
+	err = udp_init();
 	if (err) {
-		LOG_ERR("nrf_cloud_coap_init, error: %d", err);
+		LOG_ERR("UDP init failed, error: %d", err);
 		SEND_FATAL_ERROR();
-
 		return;
 	}
 }
@@ -435,51 +484,17 @@ static void state_connected_entry(void *o)
 
 static void state_connected_exit(void *o)
 {
-	int err;
-
 	ARG_UNUSED(o);
 
 	LOG_DBG("%s", __func__);
 
-	err = nrf_cloud_coap_disconnect();
-	if (err && (err != -ENOTCONN)) {
-		LOG_ERR("nrf_cloud_coap_disconnect, error: %d", err);
-		SEND_FATAL_ERROR();
+	if (sock_fd >= 0) {
+		close(sock_fd);
+		sock_fd = -1;
 	}
 }
 
 /* Handlers for STATE_CONNECTED_READY */
-
-static void shadow_get(bool delta_only)
-{
-	int err;
-	uint8_t recv_buf[CONFIG_APP_MODULE_RECV_BUFFER_SIZE] = { 0 };
-	size_t recv_buf_len = sizeof(recv_buf);
-
-	LOG_DBG("Requesting device shadow from the device");
-
-	err = nrf_cloud_coap_shadow_get(recv_buf, &recv_buf_len, delta_only,
-					COAP_CONTENT_FORMAT_APP_JSON);
-	if (err == -EACCES) {
-		LOG_WRN("Not connected, error: %d", err);
-		return;
-	} else if (err == -ETIMEDOUT) {
-		LOG_WRN("Request timed out, error: %d", err);
-		return;
-	} else if (err > 0) {
-		LOG_WRN("Cloud error: %d", err);
-
-		IF_ENABLED(CONFIG_MEMFAULT,
-			(MEMFAULT_TRACE_EVENT_WITH_STATUS(nrf_cloud_coap_shadow_get, err)));
-
-		return;
-	} else if (err) {
-		LOG_ERR("Failed to request shadow delta: %d", err);
-		return;
-	}
-
-	/* No further processing of shadow is implemented */
-}
 
 static void state_connected_ready_entry(void *o)
 {
@@ -494,11 +509,8 @@ static void state_connected_ready_entry(void *o)
 	if (err) {
 		LOG_ERR("zbus_chan_pub, error: %d", err);
 		SEND_FATAL_ERROR();
-
 		return;
 	}
-
-	shadow_get(false);
 }
 
 static void state_connected_ready_run(void *o)
@@ -521,24 +533,18 @@ static void state_connected_ready_run(void *o)
 			break;
 
 		case NETWORK_QUALITY_SAMPLE_RESPONSE:
-			err = nrf_cloud_coap_sensor_send(CUSTOM_JSON_APPID_VAL_CONEVAL,
-							 msg.conn_eval_params.energy_estimate,
-							 NRF_CLOUD_NO_TIMESTAMP, true);
+			/* Simplified message sending for connection quality data */
+			char buf[64];
+			snprintf(buf, sizeof(buf), "{\"type\":\"coneval\",\"energy\":%d,\"rsrp\":%d}",
+					msg.conn_eval_params.energy_estimate,
+					msg.conn_eval_params.rsrp);
+			
+			err = udp_send(buf, strlen(buf));
 			if (err) {
-				LOG_ERR("nrf_cloud_coap_sensor_send, error: %d", err);
+				LOG_ERR("Failed to send connection quality data, error: %d", err);
 				SEND_FATAL_ERROR();
 				return;
 			}
-
-			err = nrf_cloud_coap_sensor_send(NRF_CLOUD_JSON_APPID_VAL_RSRP,
-							 msg.conn_eval_params.rsrp,
-							 NRF_CLOUD_NO_TIMESTAMP, true);
-			if (err) {
-				LOG_ERR("nrf_cloud_coap_sensor_send, error: %d", err);
-				SEND_FATAL_ERROR();
-				return;
-			}
-
 			break;
 
 		default:
@@ -551,14 +557,15 @@ static void state_connected_ready_run(void *o)
 		struct battery_msg msg = MSG_TO_BATTERY_MSG(state_object->msg_buf);
 
 		if (msg.type == BATTERY_PERCENTAGE_SAMPLE_RESPONSE) {
-			err = nrf_cloud_coap_sensor_send(CUSTOM_JSON_APPID_VAL_BATTERY,
-							 msg.percentage,
-							 NRF_CLOUD_NO_TIMESTAMP, true);
+			char buf[32];
+			snprintf(buf, sizeof(buf), "{\"type\":\"battery\",\"value\":%.2f}", 
+					msg.percentage);
+			
+			err = udp_send(buf, strlen(buf));
 			if (err) {
-				LOG_ERR("nrf_cloud_coap_sensor_send, error: %d", err);
+				LOG_ERR("Failed to send battery data, error: %d", err);
 				SEND_FATAL_ERROR();
 			}
-
 			return;
 		}
 	}
@@ -568,27 +575,16 @@ static void state_connected_ready_run(void *o)
 		struct environmental_msg msg = MSG_TO_ENVIRONMENTAL_MSG(state_object->msg_buf);
 
 		if (msg.type == ENVIRONMENTAL_SENSOR_SAMPLE_RESPONSE) {
-			err = nrf_cloud_coap_sensor_send(NRF_CLOUD_JSON_APPID_VAL_TEMP,
-							 msg.temperature,
-							 NRF_CLOUD_NO_TIMESTAMP, true);
+			char buf[128];
+			
+			/* Send all environmental data in one JSON message */
+			snprintf(buf, sizeof(buf), 
+				"{\"type\":\"environmental\",\"temp\":%.2f,\"pressure\":%.2f,\"humidity\":%.2f}",
+				msg.temperature, msg.pressure, msg.humidity);
+			
+			err = udp_send(buf, strlen(buf));
 			if (err) {
-				LOG_ERR("nrf_cloud_coap_sensor_send, error: %d", err);
-				SEND_FATAL_ERROR();
-			}
-
-			err = nrf_cloud_coap_sensor_send(NRF_CLOUD_JSON_APPID_VAL_AIR_PRESS,
-							 msg.pressure,
-							 NRF_CLOUD_NO_TIMESTAMP, true);
-			if (err) {
-				LOG_ERR("nrf_cloud_coap_sensor_send, error: %d", err);
-				SEND_FATAL_ERROR();
-			}
-
-			err = nrf_cloud_coap_sensor_send(NRF_CLOUD_JSON_APPID_VAL_HUMID,
-							 msg.humidity,
-							 NRF_CLOUD_NO_TIMESTAMP, true);
-			if (err) {
-				LOG_ERR("nrf_cloud_coap_sensor_send, error: %d", err);
+				LOG_ERR("Failed to send environmental data, error: %d", err);
 				SEND_FATAL_ERROR();
 			}
 
@@ -599,9 +595,9 @@ static void state_connected_ready_run(void *o)
 	if (state_object->chan == &PAYLOAD_CHAN) {
 		struct cloud_payload *payload = MSG_TO_PAYLOAD(state_object->msg_buf);
 
-		err = nrf_cloud_coap_json_message_send(payload->buffer, false, false);
+		err = udp_send(payload->buffer, strlen(payload->buffer));
 		if (err) {
-			LOG_ERR("nrf_cloud_coap_json_message_send, error: %d", err);
+			LOG_ERR("Failed to send payload, error: %d", err);
 			SEND_FATAL_ERROR();
 		}
 	}
@@ -610,9 +606,7 @@ static void state_connected_ready_run(void *o)
 		const enum trigger_type type = MSG_TO_TRIGGER_TYPE(state_object->msg_buf);
 
 		if (type == TRIGGER_POLL_SHADOW) {
-			LOG_DBG("Poll trigger received");
-
-			shadow_get(true);
+			LOG_DBG("Poll trigger received but shadow not implemented for UDP");
 		}
 	}
 }

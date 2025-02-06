@@ -5,7 +5,7 @@
 #
 
 menu "Cloud module"
-	depends on NRF_CLOUD_COAP
+	#depends on NRF_CLOUD_COAP
 
 config APP_CLOUD_BACKOFF_INITIAL_SECONDS
 	int "Reconnection backoff time in seconds"
@@ -76,6 +76,18 @@ config APP_CLOUD_EXEC_TIME_SECONDS_MAX
 	default 120
 	help
 	  Maximum time allowed for a single execution of the module's thread loop.
+
+config APP_CLOUD_SERVER_PORT
+	int "Cloud server port"
+	default 1234
+	help
+	  Port for connecting to the cloud server. This value can be overridden in prj.conf.
+
+config APP_CLOUD_SERVER_ADDR
+	string "Cloud server address"
+	default "0.0.0.0"
+	help
+	  Address of the cloud server. This value can be overridden in prj.conf.
 
 module = APP_CLOUD
 module-str = Cloud

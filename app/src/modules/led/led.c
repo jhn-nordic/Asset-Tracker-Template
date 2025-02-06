@@ -12,7 +12,6 @@
 #include "message_channel.h"
 #include "led_pwm.h"
 #include "led.h"
-#include "location.h"
 #include "network.h"
 
 /* Register log module */
@@ -29,7 +28,6 @@ ZBUS_LISTENER_DEFINE(led, led_callback);
 ZBUS_CHAN_ADD_OBS(ERROR_CHAN, led, 0);
 ZBUS_CHAN_ADD_OBS(CONFIG_CHAN, led, 0);
 ZBUS_CHAN_ADD_OBS(NETWORK_CHAN, led, 0);
-ZBUS_CHAN_ADD_OBS(LOCATION_CHAN, led, 0);
 
 /* Zephyr SMF states */
 enum state {
@@ -72,9 +70,6 @@ struct s_object {
 
 	/* Network status */
 	enum network_msg_type status;
-
-	/* Network status */
-	enum location_status location_status;
 
 	/* LED color */
 	uint8_t red;
@@ -325,22 +320,6 @@ static void led_not_set_running(void *o)
 		smf_set_state(SMF_CTX(user_object), &states[STATE_LED_SET]);
 		return;
 	}
-
-	if ((&LOCATION_CHAN == user_object->chan) && user_object->location_status == LOCATION_SEARCH_STARTED) {
-		transition_list_clear();
-		transition_list_append(LED_LOCATION_SEARCHING, HOLD_FOREVER, 0, 0, 0);
-
-		k_work_reschedule(&led_pattern_update_work, K_NO_WAIT);
-		return;
-	}
-
-	if ((&LOCATION_CHAN == user_object->chan) && user_object->location_status == LOCATION_SEARCH_DONE) {
-		transition_list_clear();
-		transition_list_append(LED_OFF, HOLD_FOREVER, 0, 0, 0);
-
-		k_work_reschedule(&led_pattern_update_work, K_NO_WAIT);
-		return;
-	}
 }
 
 /* STATE_ERROR */
@@ -404,11 +383,6 @@ void led_callback(const struct zbus_channel *chan)
 	if (&NETWORK_CHAN == chan) {
 		const struct network_msg *msg = zbus_chan_const_msg(chan);
 		state_object.status = msg->type;
-	}
-
-	if (&LOCATION_CHAN == chan) {
-		const enum location_status *status = zbus_chan_const_msg(chan);
-		state_object.location_status = *status;
 	}
 
 	if (&CONFIG_CHAN == chan) {

@@ -85,6 +85,7 @@ enum trigger_type {
 	TRIGGER_POLL_SHADOW = 0x1,
 	TRIGGER_FOTA_POLL,
 	TRIGGER_DATA_SAMPLE,
+	TRIGGER_MWC_DATA,
 };
 
 #define MSG_TO_TRIGGER_TYPE(_msg)	(*(const enum trigger_type *)_msg)

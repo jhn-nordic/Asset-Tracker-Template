@@ -164,11 +164,11 @@ static void triggers_send(void)
 	}
 
 	/* Send trigger for shadow polling */
-	poll_trigger = TRIGGER_POLL_SHADOW;
+	poll_trigger = TRIGGER_MWC_DATA;
 
 	err = zbus_chan_pub(&TRIGGER_CHAN, &poll_trigger, K_SECONDS(1));
 	if (err) {
-		LOG_ERR("zbus_chan_pub shadow trigger, error: %d", err);
+		LOG_ERR("zbus_chan_pub mwc data trigger, error: %d", err);
 		SEND_FATAL_ERROR();
 		return;
 	}
