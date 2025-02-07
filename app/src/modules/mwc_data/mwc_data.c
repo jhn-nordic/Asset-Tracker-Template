@@ -193,40 +193,94 @@ static void cloud_connected_run(void *o)
 				snprintf(oper, sizeof(oper), "N/A");
 			}
 
-	#if defined(CONFIG_APP_BATTERY)
+#if defined(CONFIG_APP_BATTERY)
 			double battery_val = battery_data_valid ? latest_battery_msg.percentage : 0.0;
-	#endif
-    #if defined(CONFIG_APP_ENVIRONMENTAL)
+#endif
+#if defined(CONFIG_APP_ENVIRONMENTAL)
 			double temp = env_data_valid ? latest_env_msg.temperature : 0.0;
 			double pressure = env_data_valid ? latest_env_msg.pressure : 0.0;
 			double humidity = env_data_valid ? latest_env_msg.humidity : 0.0;
-    #endif
+#endif
 
-			/* Build the JSON output including battery and environmental data */
+			/* Build the output payload including battery and environmental data */
 			struct cloud_payload payload = {0};
+#if defined(CONFIG_APP_MWC_DATA_CSV)
+			/* Prepare CSV output with 9 columns:
+			 * ping, rsrp, band, ue_mode, operator, battery, temp, pressure, humidity
+			 */
+#if defined(CONFIG_APP_BATTERY)
+			/* battery_val already computed above */
+#endif
+#if defined(CONFIG_APP_ENVIRONMENTAL)
+			/* temp, pressure and humidity are computed above */
+#endif
+#if defined(CONFIG_APP_BATTERY)
+			char battery_str[16] = "";
+
+			if (battery_data_valid) {
+				snprintf(battery_str, sizeof(battery_str), "%.2f", battery_val);
+			}
+#endif
+#if defined(CONFIG_APP_ENVIRONMENTAL)
+			char temp_str[16] = "", pressure_str[16] = "", humidity_str[16] = "";
+
+			if (env_data_valid) {
+				snprintf(temp_str, sizeof(temp_str), "%.2f", temp);
+				snprintf(pressure_str, sizeof(pressure_str), "%.2f", pressure);
+				snprintf(humidity_str, sizeof(humidity_str), "%.2f", humidity);
+			}
+#endif
+			payload.buffer_len = snprintf((char *)payload.buffer,
+				sizeof(payload.buffer),
+				"%lld,%s,%s,%s,%s,%s,%s,%s,%s",
+				ping_rtt,
+				rsrp,
+				band,
+				ue_mode,
+				oper,
+#if defined(CONFIG_APP_BATTERY)
+				battery_str,
+#else
+				"",
+#endif
+#if defined(CONFIG_APP_ENVIRONMENTAL)
+				temp_str,
+				pressure_str,
+				humidity_str
+#else
+				"", "", ""
+#endif
+			);
+#else
+			/* JSON payload (unchanged) */
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
 				"{\"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\""
-	#if defined(CONFIG_APP_BATTERY)
+#if defined(CONFIG_APP_BATTERY)
 				", \"battery\": %.2f"
-	#endif
-    #if defined(CONFIG_APP_ENVIRONMENTAL)
+#endif
+#if defined(CONFIG_APP_ENVIRONMENTAL)
 				", \"temp\": %.2f, \"pressure\": %.2f, \"humidity\": %.2f"
-    #endif
+#endif
 				"}",
-				ping_rtt, rsrp, band, ue_mode, oper
-	#if defined(CONFIG_APP_BATTERY)
+				ping_rtt,
+				rsrp,
+				band,
+				ue_mode,
+				oper
+#if defined(CONFIG_APP_BATTERY)
 				, battery_val
-	#endif
-    #if defined(CONFIG_APP_ENVIRONMENTAL)
+#endif
+#if defined(CONFIG_APP_ENVIRONMENTAL)
 				, temp, pressure, humidity
-    #endif
-				);
+#endif
+			);
+#endif
 
-			LOG_INF("Output JSON: %s", payload.buffer);
+			LOG_INF("Output payload: %s", payload.buffer);
 
-			/* Publish the JSON payload to the PAYLOAD channel */
-			zbus_chan_pub(&PAYLOAD_CHAN, &payload,  K_SECONDS(1));
+			/* Publish the payload to the PAYLOAD channel */
+			zbus_chan_pub(&PAYLOAD_CHAN, &payload, K_SECONDS(1));
 		}
 	}
 }

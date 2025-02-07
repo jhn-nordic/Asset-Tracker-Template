@@ -10,4 +10,14 @@ module = APP_MWC_DATA
 module-str = MWC Data
 source "subsys/logging/Kconfig.template.log_config"
 
+config APP_MWC_DATA_CSV
+	bool "Format MWC data output as CSV"
+	default n
+	help
+		When enabled, the MWC Data module sends data as a comma-separated string.
+		The output contains 9 columns:
+		ping, rsrp, band, ue_mode, operator, battery, temp, pressure, humidity.
+		If battery or environmental data is not available, the corresponding
+		fields will be left empty.
+
 endif # APP_MWC_DATA 
