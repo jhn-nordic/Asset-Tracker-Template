@@ -168,14 +168,18 @@ static void cloud_connected_run(void *o)
 	}
 
 	if (user_object->chan == &TRIGGER_CHAN) {
-		/* Instead of reading directly from the channel message, use the stored trigger value */
 		if (user_object->trigger == TRIGGER_MWC_DATA) {
 			LOG_INF("Received MWC_DATA trigger, performing ping test");
 			int64_t ping_rtt = perform_ping();
 
 			/* Collect modem info values */
-			char rsrp[16] = {0}, band[16] = {0}, ue_mode[16] = {0}, oper[16] = {0};
+			char rsrp[16] = {0}, band[16] = {0}, ue_mode[16] = {0}, oper[16] = {0}, imei[16] = {0};
 			int ret;
+			
+			ret = modem_info_string_get(MODEM_INFO_IMEI, imei, sizeof(imei));
+			if (ret < 0) {
+				snprintf(imei, sizeof(imei), "N/A");
+			}
 			ret = modem_info_string_get(MODEM_INFO_RSRP, rsrp, sizeof(rsrp));
 			if (ret < 0) {
 				snprintf(rsrp, sizeof(rsrp), "N/A");
@@ -205,15 +209,9 @@ static void cloud_connected_run(void *o)
 			/* Build the output payload including battery and environmental data */
 			struct cloud_payload payload = {0};
 #if defined(CONFIG_APP_MWC_DATA_CSV)
-			/* Prepare CSV output with 9 columns:
-			 * ping, rsrp, band, ue_mode, operator, battery, temp, pressure, humidity
+			/* Prepare CSV output with 10 columns:
+			 * imei, ping, rsrp, band, ue_mode, operator, battery, temp, pressure, humidity
 			 */
-#if defined(CONFIG_APP_BATTERY)
-			/* battery_val already computed above */
-#endif
-#if defined(CONFIG_APP_ENVIRONMENTAL)
-			/* temp, pressure and humidity are computed above */
-#endif
 #if defined(CONFIG_APP_BATTERY)
 			char battery_str[16] = "";
 
@@ -232,7 +230,8 @@ static void cloud_connected_run(void *o)
 #endif
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
-				"%lld,%s,%s,%s,%s,%s,%s,%s,%s",
+				"%s,%lld,%s,%s,%s,%s,%s,%s,%s,%s",
+				imei,
 				ping_rtt,
 				rsrp,
 				band,
@@ -252,10 +251,10 @@ static void cloud_connected_run(void *o)
 #endif
 			);
 #else
-			/* JSON payload (unchanged) */
+			/* JSON payload */
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
-				"{\"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\""
+				"{\"id\": \"%s\", \"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\""
 #if defined(CONFIG_APP_BATTERY)
 				", \"battery\": %.2f"
 #endif
@@ -263,6 +262,7 @@ static void cloud_connected_run(void *o)
 				", \"temp\": %.2f, \"pressure\": %.2f, \"humidity\": %.2f"
 #endif
 				"}",
+				imei,
 				ping_rtt,
 				rsrp,
 				band,
