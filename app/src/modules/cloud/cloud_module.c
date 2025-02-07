@@ -53,10 +53,6 @@ ZBUS_MSG_SUBSCRIBER_DEFINE(cloud);
 ZBUS_CHAN_ADD_OBS(PAYLOAD_CHAN, cloud, 0);
 ZBUS_CHAN_ADD_OBS(NETWORK_CHAN, cloud, 0);
 ZBUS_CHAN_ADD_OBS(TRIGGER_CHAN, cloud, 0);
-ZBUS_CHAN_ADD_OBS(ENVIRONMENTAL_CHAN, cloud, 0);
-#if defined(CONFIG_APP_BATTERY)
-ZBUS_CHAN_ADD_OBS(BATTERY_CHAN, cloud, 0);
-#endif /* CONFIG_APP_BATTERY */
 
 /* Define channels provided by this module */
 
@@ -522,7 +518,6 @@ static void state_connected_ready_run(void *o)
 
 	if (state_object->chan == &NETWORK_CHAN) {
 		struct network_msg msg = MSG_TO_NETWORK_MSG(state_object->msg_buf);
-
 		switch (msg.type) {
 		case NETWORK_DISCONNECTED:
 			STATE_SET(cloud_state, STATE_CONNECTED_PAUSED);
@@ -532,67 +527,25 @@ static void state_connected_ready_run(void *o)
 			STATE_EVENT_HANDLED(cloud_state);
 			break;
 
-		case NETWORK_QUALITY_SAMPLE_RESPONSE:
+		case NETWORK_QUALITY_SAMPLE_RESPONSE: {
 			/* Simplified message sending for connection quality data */
 			char buf[64];
-			snprintf(buf, sizeof(buf), "{\"type\":\"coneval\",\"energy\":%d,\"rsrp\":%d}",
-					msg.conn_eval_params.energy_estimate,
-					msg.conn_eval_params.rsrp);
-			
+			snprintf(buf, sizeof(buf),
+			         "{\"type\":\"coneval\",\"energy\":%d,\"rsrp\":%d}",
+			         msg.conn_eval_params.energy_estimate,
+			         msg.conn_eval_params.rsrp);
+
 			err = udp_send(buf, strlen(buf));
 			if (err) {
 				LOG_ERR("Failed to send connection quality data, error: %d", err);
 				SEND_FATAL_ERROR();
-				return;
 			}
 			break;
-
+		}
 		default:
 			break;
 		}
-	}
-
-#if defined(CONFIG_APP_BATTERY)
-	if (state_object->chan == &BATTERY_CHAN) {
-		struct battery_msg msg = MSG_TO_BATTERY_MSG(state_object->msg_buf);
-
-		if (msg.type == BATTERY_PERCENTAGE_SAMPLE_RESPONSE) {
-			char buf[32];
-			snprintf(buf, sizeof(buf), "{\"type\":\"battery\",\"value\":%.2f}", 
-					msg.percentage);
-			
-			err = udp_send(buf, strlen(buf));
-			if (err) {
-				LOG_ERR("Failed to send battery data, error: %d", err);
-				SEND_FATAL_ERROR();
-			}
-			return;
-		}
-	}
-#endif /* CONFIG_APP_BATTERY */
-
-	if (state_object->chan == &ENVIRONMENTAL_CHAN) {
-		struct environmental_msg msg = MSG_TO_ENVIRONMENTAL_MSG(state_object->msg_buf);
-
-		if (msg.type == ENVIRONMENTAL_SENSOR_SAMPLE_RESPONSE) {
-			char buf[128];
-			
-			/* Send all environmental data in one JSON message */
-			snprintf(buf, sizeof(buf), 
-				"{\"type\":\"environmental\",\"temp\":%.2f,\"pressure\":%.2f,\"humidity\":%.2f}",
-				msg.temperature, msg.pressure, msg.humidity);
-			
-			err = udp_send(buf, strlen(buf));
-			if (err) {
-				LOG_ERR("Failed to send environmental data, error: %d", err);
-				SEND_FATAL_ERROR();
-			}
-
-			return;
-		}
-	}
-
-	if (state_object->chan == &PAYLOAD_CHAN) {
+	} else if (state_object->chan == &PAYLOAD_CHAN) {
 		struct cloud_payload *payload = MSG_TO_PAYLOAD(state_object->msg_buf);
 
 		err = udp_send(payload->buffer, strlen(payload->buffer));
@@ -600,14 +553,15 @@ static void state_connected_ready_run(void *o)
 			LOG_ERR("Failed to send payload, error: %d", err);
 			SEND_FATAL_ERROR();
 		}
-	}
-
-	if (state_object->chan == &TRIGGER_CHAN) {
+	} else if (state_object->chan == &TRIGGER_CHAN) {
 		const enum trigger_type type = MSG_TO_TRIGGER_TYPE(state_object->msg_buf);
 
 		if (type == TRIGGER_POLL_SHADOW) {
 			LOG_DBG("Poll trigger received but shadow not implemented for UDP");
 		}
+	} else {
+		/* Ignore any other channels (e.g. battery or environmental, if they ever arrive) */
+		LOG_DBG("Ignoring event on channel %s", zbus_chan_name(state_object->chan));
 	}
 }
 

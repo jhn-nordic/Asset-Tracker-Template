@@ -20,8 +20,19 @@
 #include "message_channel.h"
 #include "ping.h"
 #include "../cloud/cloud_module.h"
-#include <modem/modem_info.h>
+#if defined(CONFIG_APP_BATTERY)
+#include "battery.h"
 
+#endif
+
+
+#if defined(CONFIG_APP_BATTERY)
+static struct battery_msg latest_battery_msg;
+static bool battery_data_valid = false;
+#endif
+
+static struct environmental_msg latest_env_msg;
+static bool env_data_valid = false;
 
 /* Register log module */
 LOG_MODULE_REGISTER(mwc_data, CONFIG_APP_LOG_LEVEL);
@@ -33,6 +44,10 @@ ZBUS_LISTENER_DEFINE(mwc_data_listener, mwc_data_callback);
 /* Observe channels */
 ZBUS_CHAN_ADD_OBS(CLOUD_CHAN, mwc_data_listener, 0);
 ZBUS_CHAN_ADD_OBS(TRIGGER_CHAN, mwc_data_listener, 0);
+#if defined(CONFIG_APP_BATTERY)
+ZBUS_CHAN_ADD_OBS(BATTERY_CHAN, mwc_data_listener, 0);
+#endif
+ZBUS_CHAN_ADD_OBS(ENVIRONMENTAL_CHAN, mwc_data_listener, 0);
 
 /* Forward declarations */
 static const struct smf_state states[];
@@ -80,11 +95,30 @@ static const struct smf_state states[] = {
 	)
 };
 
-/* State object */
+/* New definitions for thread and message queue */
+#define MWC_DATA_THREAD_STACK_SIZE 4096
+
+/* Define an event structure for CLOUD and TRIGGER events */
+struct mwc_data_event {
+	const struct zbus_channel *chan;
+	union {
+		enum cloud_msg_type cloud_status;
+		enum trigger_type trigger;
+	} data;
+};
+
+/* Define a message queue for passing events to the thread */
+K_MSGQ_DEFINE(mwc_data_msgq, sizeof(struct mwc_data_event), 10, 4);
+
+
+
+/* Updated state object: Added trigger field */
 static struct state_object {
 	struct smf_ctx ctx;
 	const struct zbus_channel *chan;
 	enum cloud_msg_type status;
+	/* New field to store trigger events */
+	enum trigger_type trigger;
 } mwc_data_state;
 
 /* State implementations */
@@ -134,10 +168,9 @@ static void cloud_connected_run(void *o)
 	}
 
 	if (user_object->chan == &TRIGGER_CHAN) {
-		const enum trigger_type *trigger = zbus_chan_const_msg(user_object->chan);
-		if (*trigger == TRIGGER_MWC_DATA) {
+		/* Instead of reading directly from the channel message, use the stored trigger value */
+		if (user_object->trigger == TRIGGER_MWC_DATA) {
 			LOG_INF("Received MWC_DATA trigger, performing ping test");
-			/* Call the modified ping function and obtain the round-trip time */
 			int64_t ping_rtt = perform_ping();
 
 			/* Collect modem info values */
@@ -160,11 +193,36 @@ static void cloud_connected_run(void *o)
 				snprintf(oper, sizeof(oper), "N/A");
 			}
 
-			/* Build the JSON output */
+	#if defined(CONFIG_APP_BATTERY)
+			double battery_val = battery_data_valid ? latest_battery_msg.percentage : 0.0;
+	#endif
+    #if defined(CONFIG_APP_ENVIRONMENTAL)
+			double temp = env_data_valid ? latest_env_msg.temperature : 0.0;
+			double pressure = env_data_valid ? latest_env_msg.pressure : 0.0;
+			double humidity = env_data_valid ? latest_env_msg.humidity : 0.0;
+    #endif
+
+			/* Build the JSON output including battery and environmental data */
 			struct cloud_payload payload = {0};
-			payload.buffer_len = snprintf((char *)payload.buffer, sizeof(payload.buffer),
-			    "{\"ping\": %lld, \"rsrp\": %s, \"band\": %s, \"ue_mode\": %s, \"operator\": \"%s\"}",
-			    ping_rtt, rsrp, band, ue_mode, oper);
+			payload.buffer_len = snprintf((char *)payload.buffer,
+				sizeof(payload.buffer),
+				"{\"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\""
+	#if defined(CONFIG_APP_BATTERY)
+				", \"battery\": %.2f"
+	#endif
+    #if defined(CONFIG_APP_ENVIRONMENTAL)
+				", \"temp\": %.2f, \"pressure\": %.2f, \"humidity\": %.2f"
+    #endif
+				"}",
+				ping_rtt, rsrp, band, ue_mode, oper
+	#if defined(CONFIG_APP_BATTERY)
+				, battery_val
+	#endif
+    #if defined(CONFIG_APP_ENVIRONMENTAL)
+				, temp, pressure, humidity
+    #endif
+				);
+
 			LOG_INF("Output JSON: %s", payload.buffer);
 
 			/* Publish the JSON payload to the PAYLOAD channel */
@@ -195,37 +253,73 @@ static void cloud_disconnected_run(void *o)
 static void mwc_data_callback(const struct zbus_channel *chan)
 {
 	int err;
+#if defined(CONFIG_APP_BATTERY)
+	if (chan == &BATTERY_CHAN) {
 
-	if ((chan != &CLOUD_CHAN) && (chan != &TRIGGER_CHAN)) {
-		LOG_ERR("Unknown channel");
+		const struct battery_msg *msg = zbus_chan_const_msg(chan);
+		latest_battery_msg = *msg;  // store the battery reading
+		battery_data_valid = true;
+		LOG_DBG("Updated battery data: percentage=%.2f", msg->percentage);
+
+		return;
+	}
+#endif
+	if (chan == &ENVIRONMENTAL_CHAN) {
+		const struct environmental_msg *msg = zbus_chan_const_msg(chan);
+		latest_env_msg = *msg;  // store the environmental reading
+		env_data_valid = true;
+		LOG_DBG("Updated environmental data: temp=%.2f, pressure=%.2f, humidity=%.2f",
+			msg->temperature, msg->pressure, msg->humidity);
 		return;
 	}
 
-	LOG_DBG("Received message on channel %s", zbus_chan_name(chan));
-
-	mwc_data_state.chan = chan;
-
+	/* For CLOUD and TRIGGER channels, enqueue the event */
+	struct mwc_data_event event;
+	event.chan = chan;
 	if (chan == &CLOUD_CHAN) {
 		const enum cloud_msg_type *status = zbus_chan_const_msg(chan);
-		mwc_data_state.status = *status;
+		event.data.cloud_status = *status;
 	} else if (chan == &TRIGGER_CHAN) {
-		/* Handle trigger when implemented */
-		LOG_DBG("Received trigger");
-	}
-
-	err = STATE_RUN(mwc_data_state);
-	if (err) {
-		LOG_ERR("smf_run_state, error: %d", err);
-		SEND_FATAL_ERROR();
+		const enum trigger_type *trigger = zbus_chan_const_msg(chan);
+		event.data.trigger = *trigger;
+	} else {
+		LOG_ERR("Unknown channel: %s", zbus_chan_name(chan));
 		return;
 	}
+
+	LOG_DBG("Enqueueing message from channel %s", zbus_chan_name(chan));
+	err = k_msgq_put(&mwc_data_msgq, &event, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Message queue full, dropping event from channel %s", zbus_chan_name(chan));
+	}
 }
 
-/* Module initialization */
-static int mwc_data_init(void)
+/* Dedicated thread for processing mwc_data events */
+static void mwc_data_thread(void *arg1, void *arg2, void *arg3)
 {
-	STATE_SET_INITIAL(mwc_data_state, STATE_INIT);
-	return 0;
+    	STATE_SET_INITIAL(mwc_data_state, STATE_INIT);
+	while (1) {
+		struct mwc_data_event event;
+		/* Block until an event is available */
+		if (k_msgq_get(&mwc_data_msgq, &event, K_FOREVER) == 0) {
+			/* Update the state object based on the queued event */
+			mwc_data_state.chan = event.chan;
+			if (event.chan == &CLOUD_CHAN) {
+				mwc_data_state.status = event.data.cloud_status;
+			} else if (event.chan == &TRIGGER_CHAN) {
+				mwc_data_state.trigger = event.data.trigger;
+			}
+			LOG_DBG("Processing event from channel %s", zbus_chan_name(event.chan));
+			int err = STATE_RUN(mwc_data_state);
+			if (err) {
+				LOG_ERR("smf_run_state, error: %d", err);
+				SEND_FATAL_ERROR();
+			}
+		}
+	}
 }
 
-SYS_INIT(mwc_data_init, POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY);
+
+K_THREAD_DEFINE(mwc_data_module_thread_id,
+		MWC_DATA_THREAD_STACK_SIZE,
+		mwc_data_thread, NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
