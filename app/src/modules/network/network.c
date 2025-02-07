@@ -511,9 +511,9 @@ static void state_connected_run(void *obj)
 
 	LOG_DBG("state_connected_run");
 
-	if (!IS_ENABLED(CONFIG_APP_NETWORK_SAMPLE_NETWORK_QUALITY)) {
-		return;
-	}
+	// if (!IS_ENABLED(CONFIG_APP_NETWORK_SAMPLE_NETWORK_QUALITY)) {
+	// 	return;
+	// }
 
 	if (&NETWORK_CHAN == state_object->chan) {
 		struct network_msg msg = MSG_TO_NETWORK_MSG(state_object->msg_buf);
@@ -524,6 +524,7 @@ static void state_connected_run(void *obj)
 			sample_network_quality();
 			break;
 		case NETWORK_DISCONNECT:
+			LOG_DBG("Disconnecting from network");
 			STATE_SET(network_state, STATE_DISCONNECTING);
 			break;
 		default:

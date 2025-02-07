@@ -22,6 +22,8 @@
 
 #include "message_channel.h"
 #include "button.h"
+#include "../network/network.h"
+
 
 LOG_MODULE_REGISTER(shell, CONFIG_APP_SHELL_LOG_LEVEL);
 
@@ -238,6 +240,36 @@ static int cmd_publish_on_payload_chan(const struct shell *sh, size_t argc, char
 	return 0;
 }
 
+static int cmd_network_command(const struct shell *sh, size_t argc, char **argv)
+{
+	int err;
+	struct network_msg msg = { .type = NETWORK_DISCONNECT, };
+
+	if (argc != 2) {
+		shell_print(sh, "Usage: network cmd <command>");
+		shell_print(sh, "Available commands: connect, disconnect, system_mode");
+		return 1;
+	}
+
+	if (strcmp(argv[1], "connect") == 0) {
+		msg.type = NETWORK_CONNECT;
+	} else if (strcmp(argv[1], "disconnect") == 0) {
+		msg.type = NETWORK_DISCONNECT;
+	} else {
+		shell_print(sh, "Unknown command: %s", argv[1]);
+		shell_print(sh, "Available commands: connect, disconnect, system_mode");
+		return 1;
+	}
+
+	err = zbus_chan_pub(&NETWORK_CHAN, &msg, K_SECONDS(1));
+	if (err) {
+		shell_print(sh, "Failed to publish network command, error: %d", err);
+		return 1;
+	}
+
+	shell_print(sh, "Network command sent: %s", argv[1]);
+	return 0;
+}
 
 static void task_wdt_callback(int channel_id, void *user_data)
 {
@@ -307,6 +339,7 @@ static void shell_task(void)
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_zbus_publish,
 				SHELL_CMD(payload_chan,   NULL, "Publish on payload channel", cmd_publish_on_payload_chan),
+				SHELL_CMD(network, NULL, "Send network commands (e.g. disconnect)", cmd_network_command),
 				SHELL_SUBCMD_SET_END
 		);
 
