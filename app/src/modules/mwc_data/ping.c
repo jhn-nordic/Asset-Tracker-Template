@@ -64,9 +64,9 @@ int64_t perform_ping(void)
 		return -1;
 	}
 
-	// Set the receive timeout to 2 seconds
+	// Set the receive timeout to 30 seconds
 	struct timeval tv = {
-		.tv_sec = 2,
+		.tv_sec = 30,
 		.tv_usec = 0,
 	};
 	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
