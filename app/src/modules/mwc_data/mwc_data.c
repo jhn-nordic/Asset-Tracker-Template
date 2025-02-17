@@ -230,7 +230,7 @@ static void cloud_connected_run(void *o)
 #endif
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
-				"%s,%lld,%s,%s,%s,%s,%s,%s,%d,%s,%s,%s,%s",
+				"%s,,%lld,%s,%s,%s,%s,%s,%s,%d,%s,%s,%s,%s",
 				imei,
 				ping_rtt,
 				rsrp,
