@@ -147,7 +147,7 @@ static int udp_init(void)
 static int udp_connect(const char *version)
 {
 	int err;
-	client_fd = socket(AF_INET, SOCK_DGRAM, 0);
+	client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (client_fd < 0) {
 		LOG_ERR("client_fd: %d\n\r", client_fd);
 		return client_fd;
