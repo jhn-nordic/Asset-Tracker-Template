@@ -209,8 +209,8 @@ static void cloud_connected_run(void *o)
 			/* Build the output payload including battery and environmental data */
 			struct cloud_payload payload = {0};
 #if defined(CONFIG_APP_MWC_DATA_CSV)
-			/* Prepare CSV output with 10 columns:
-			 * imei, ping, rsrp, band, ue_mode, operator, battery, temp, pressure, humidity
+			/* Prepare CSV output with 12 columns:
+			 * imei, ping, rsrp, band, ue_mode, operator, latitude, longitude, battery, temp, pressure, humidity
 			 */
 #if defined(CONFIG_APP_BATTERY)
 			char battery_str[16] = "";
@@ -230,13 +230,15 @@ static void cloud_connected_run(void *o)
 #endif
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
-				"%s,%lld,%s,%s,%s,%s,%s,%s,%s,%s",
+				"%s,%lld,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
 				imei,
 				ping_rtt,
 				rsrp,
 				band,
 				ue_mode,
 				oper,
+				CONFIG_APP_MWC_DATA_LATITUDE,
+				CONFIG_APP_MWC_DATA_LONGITUDE,
 #if defined(CONFIG_APP_BATTERY)
 				battery_str,
 #else
@@ -254,7 +256,7 @@ static void cloud_connected_run(void *o)
 			/* JSON payload */
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
-				"{\"id\": \"%s\", \"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\""
+				"{\"id\": \"%s\", \"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\", \"latitude\": \"%s\", \"longitude\": \"%s\""
 #if defined(CONFIG_APP_BATTERY)
 				", \"battery\": %.2f"
 #endif
@@ -267,7 +269,9 @@ static void cloud_connected_run(void *o)
 				rsrp,
 				band,
 				ue_mode,
-				oper
+				oper,
+				CONFIG_APP_MWC_DATA_LATITUDE,
+				CONFIG_APP_MWC_DATA_LONGITUDE
 #if defined(CONFIG_APP_BATTERY)
 				, battery_val
 #endif

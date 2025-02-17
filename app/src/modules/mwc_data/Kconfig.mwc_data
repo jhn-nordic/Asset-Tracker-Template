@@ -15,9 +15,21 @@ config APP_MWC_DATA_CSV
 	default n
 	help
 		When enabled, the MWC Data module sends data as a comma-separated string.
-		The output contains 9 columns:
-		ping, rsrp, band, ue_mode, operator, battery, temp, pressure, humidity.
+		The output contains 12 columns:
+		IMEI, ping, rsrp, band, ue_mode, operator, latitude, longitude, battery, temp, pressure, humidity.
 		If battery or environmental data is not available, the corresponding
 		fields will be left empty.
+
+config APP_MWC_DATA_LATITUDE
+	string "Default latitude"
+	default "0.0"
+	help
+		Default latitude value to include in the data output.
+
+config APP_MWC_DATA_LONGITUDE
+	string "Default longitude"
+	default "0.0"
+	help
+		Default longitude value to include in the data output.
 
 endif # APP_MWC_DATA 
