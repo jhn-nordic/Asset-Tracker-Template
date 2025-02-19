@@ -113,7 +113,7 @@ static const struct smf_state states[] = {
 	[STATE_DISCONNECTED] =
 		SMF_CREATE_STATE(state_disconnected_entry, state_disconnected_run, NULL,
 				 &states[STATE_RUNNING],
-				 &states[STATE_DISCONNECTED_SEARCHING]),
+				 &states[STATE_DISCONNECTED_IDLE]),
 	[STATE_DISCONNECTED_IDLE] =
 		SMF_CREATE_STATE(NULL, state_disconnected_idle_run, NULL,
 				 &states[STATE_DISCONNECTED],
@@ -332,6 +332,15 @@ static void state_running_entry(void *obj)
 	lte_lc_register_handler(lte_lc_evt_handler);
 
 	LOG_DBG("Network module started");
+	/* Send GNSS start trigger */
+	enum trigger_type trigger = TRIGGER_GNSS_START;
+	err = zbus_chan_pub(&TRIGGER_CHAN, &trigger, K_SECONDS(1));
+	if (err) {
+		LOG_ERR("Failed to publish GNSS start trigger, error: %d", err);
+		SEND_FATAL_ERROR();
+		return;
+	}
+	LOG_DBG("Published GNSS start trigger");
 }
 
 static void state_running_run(void *obj)

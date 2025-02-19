@@ -86,6 +86,7 @@ enum trigger_type {
 	TRIGGER_FOTA_POLL,
 	TRIGGER_DATA_SAMPLE,
 	TRIGGER_MWC_DATA,
+	TRIGGER_GNSS_START,
 };
 
 #define MSG_TO_TRIGGER_TYPE(_msg)	(*(const enum trigger_type *)_msg)

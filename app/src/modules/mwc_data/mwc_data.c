@@ -17,6 +17,9 @@
 #include <modem/modem_info.h>
 #include <nrf_modem_at.h>
 #include <nrf_errno.h>
+#include <nrf_modem_gnss.h>
+#include <modem/lte_lc.h>
+#include "../network/network.h"
 
 #include "modules_common.h"
 #include "message_channel.h"
@@ -64,12 +67,21 @@ static void cloud_connected_entry(void *o);
 static void cloud_connected_run(void *o);
 static void cloud_disconnected_entry(void *o);
 static void cloud_disconnected_run(void *o);
+static void gnss_active_entry(void *o);
+static void gnss_active_run(void *o);
+
+/* Forward declarations of GNSS functions */
+static int gnss_init(void);
+static int gnss_start(void);
+static int gnss_stop(void);
+static void gnss_event_handler(int event);
 
 /* Define states */
 enum state {
 	STATE_INIT,
 	STATE_CLOUD_CONNECTED,
 	STATE_CLOUD_DISCONNECTED,
+	STATE_GNSS_ACTIVE,  // New state for GNSS operations
 };
 
 /* Construct state table */
@@ -94,7 +106,8 @@ static const struct smf_state states[] = {
 		NULL,
 		NULL,
 		NULL
-	)
+	),
+	[STATE_GNSS_ACTIVE] = SMF_CREATE_STATE(gnss_active_entry, gnss_active_run, NULL, NULL, NULL),
 };
 
 /* New definitions for thread and message queue */
@@ -114,13 +127,19 @@ K_MSGQ_DEFINE(mwc_data_msgq, sizeof(struct mwc_data_event), 10, 4);
 
 
 
-/* Updated state object: Added trigger field */
+/* Updated state object: Added trigger field and altitude field */
 static struct state_object {
 	struct smf_ctx ctx;
 	const struct zbus_channel *chan;
 	enum cloud_msg_type status;
 	/* New field to store trigger events */
 	enum trigger_type trigger;
+	bool gnss_fix_valid;         // Track if we got a valid fix
+	double latitude;             // Store latitude from fix
+	double longitude;            // Store longitude from fix
+	uint32_t gnss_timeout_ms;   // Track time spent waiting for fix
+	double altitude;             // Store altitude from fix (not sent to cloud)
+	float accuracy;             // Changed from uint32_t to float to match GNSS API
 } mwc_data_state;
 
 /* State implementations */
@@ -133,6 +152,14 @@ static void init_entry(void *o)
 static void init_run(void *o)
 {
 	struct state_object *user_object = o;
+
+	if (user_object->chan == &TRIGGER_CHAN) {
+		if (user_object->trigger == TRIGGER_GNSS_START) {
+			LOG_INF("GNSS start triggered");
+			STATE_SET(mwc_data_state, STATE_GNSS_ACTIVE);
+			return;
+		}
+	}
 
 	if (user_object->chan == &CLOUD_CHAN) {
 		if (user_object->status == CLOUD_CONNECTED_READY_TO_SEND) {
@@ -170,6 +197,11 @@ static void cloud_connected_run(void *o)
 	}
 
 	if (user_object->chan == &TRIGGER_CHAN) {
+		if (user_object->trigger == TRIGGER_GNSS_START) {
+			LOG_INF("GNSS start triggered");
+			STATE_SET(mwc_data_state, STATE_GNSS_ACTIVE);
+			return;
+		}
 		if (user_object->trigger == TRIGGER_MWC_DATA) {
 			LOG_INF("Received MWC_DATA trigger, performing ping test");
 			int64_t ping_rtt = perform_ping();
@@ -221,6 +253,11 @@ static void cloud_connected_run(void *o)
 				snprintf(battery_str, sizeof(battery_str), "%.2f", battery_val);
 			}
 #endif
+
+			// Add buffer declarations for lat/lon string conversion
+			char lat_buf[32] = "";
+			char lon_buf[32] = "";
+
 #if defined(CONFIG_APP_ENVIRONMENTAL)
 			char temp_str[16] = "", pressure_str[16] = "", humidity_str[16] = "";
 
@@ -230,6 +267,21 @@ static void cloud_connected_run(void *o)
 				snprintf(humidity_str, sizeof(humidity_str), "%.2f", humidity);
 			}
 #endif
+
+			/* Use GNSS fix data or configured values based on Kconfig */
+#if defined(CONFIG_APP_USE_GNSS_FIX)
+			const char *lat_str = mwc_data_state.gnss_fix_valid ? 
+				snprintf(lat_buf, sizeof(lat_buf), "%.6f", mwc_data_state.latitude) >= 0 ? lat_buf : "" : "";
+			const char *lon_str = mwc_data_state.gnss_fix_valid ? 
+				snprintf(lon_buf, sizeof(lon_buf), "%.6f", mwc_data_state.longitude) >= 0 ? lon_buf : "" : "";
+			int accuracy = mwc_data_state.gnss_fix_valid ? 
+				mwc_data_state.accuracy : 0;
+#else
+			const char *lat_str = CONFIG_APP_MWC_DATA_LATITUDE;
+			const char *lon_str = CONFIG_APP_MWC_DATA_LONGITUDE;
+			int accuracy = CONFIG_APP_MWC_DATA_GPS_ACCURACY;
+#endif
+
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
 				"%s,,%lld,%s,%s,%s,%s,%s,%s,%d,%s,%s,%s,%s",
@@ -239,9 +291,9 @@ static void cloud_connected_run(void *o)
 				band,
 				ue_mode,
 				oper,
-				CONFIG_APP_MWC_DATA_LATITUDE,
-				CONFIG_APP_MWC_DATA_LONGITUDE,
-				CONFIG_APP_MWC_DATA_GPS_ACCURACY,
+				lat_str,
+				lon_str,
+				accuracy,
 #if defined(CONFIG_APP_BATTERY)
 				battery_str,
 #else
@@ -259,7 +311,12 @@ static void cloud_connected_run(void *o)
 			/* JSON payload */
 			payload.buffer_len = snprintf((char *)payload.buffer,
 				sizeof(payload.buffer),
-				"{\"id\": \"%s\", \"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\", \"latitude\": \"%s\", \"longitude\": \"%s\", \"accuracy\": %d"
+				"{\"id\": \"%s\", \"ping\": %lld, \"rsrp\": \"%s\", \"band\": \"%s\", \"ue_mode\": \"%s\", \"operator\": \"%s\", "
+#if defined(CONFIG_APP_USE_GNSS_FIX)
+				"\"latitude\": \"%.*f\", \"longitude\": \"%.*f\", \"accuracy\": %d"
+#else
+				"\"latitude\": \"%s\", \"longitude\": \"%s\", \"accuracy\": %d"
+#endif
 #if defined(CONFIG_APP_BATTERY)
 				", \"battery\": %.2f"
 #endif
@@ -273,9 +330,15 @@ static void cloud_connected_run(void *o)
 				band,
 				ue_mode,
 				oper,
+#if defined(CONFIG_APP_USE_GNSS_FIX)
+				6, mwc_data_state.gnss_fix_valid ? mwc_data_state.latitude : 0.0,
+				6, mwc_data_state.gnss_fix_valid ? mwc_data_state.longitude : 0.0,
+				mwc_data_state.gnss_fix_valid ? mwc_data_state.accuracy : 0
+#else
 				CONFIG_APP_MWC_DATA_LATITUDE,
 				CONFIG_APP_MWC_DATA_LONGITUDE,
 				CONFIG_APP_MWC_DATA_GPS_ACCURACY
+#endif
 #if defined(CONFIG_APP_BATTERY)
 				, battery_val
 #endif
@@ -302,6 +365,14 @@ static void cloud_disconnected_entry(void *o)
 static void cloud_disconnected_run(void *o)
 {
 	struct state_object *user_object = o;
+
+if (user_object->chan == &TRIGGER_CHAN) {
+		if (user_object->trigger == TRIGGER_GNSS_START) {
+			LOG_INF("GNSS start triggered");
+			STATE_SET(mwc_data_state, STATE_GNSS_ACTIVE);
+			return;
+		}
+	}
 
 	if ((user_object->chan == &CLOUD_CHAN) &&
 	    (user_object->status == CLOUD_CONNECTED_READY_TO_SEND)) {
@@ -405,7 +476,6 @@ int setup_NTN_modem_commands(void) {
         return err;
     }
 
-    /* Disable eDRX */
     err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_EPCO);
     if (err) {
         LOG_ERR("Failed to set XEPCO, error: %d", err);
@@ -413,7 +483,15 @@ int setup_NTN_modem_commands(void) {
     }
 
     /* Set GPS position */
-    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_SETGPSPOS);
+	if (CONFIG_APP_USE_GNSS_FIX) {
+		int latitude = (int)(mwc_data_state.latitude * 1000)+90000;
+		int longitude = (int)(mwc_data_state.longitude * 1000)+180000;
+		int altitude = (int)(mwc_data_state.altitude * 1000);
+		err = nrf_modem_at_printf("AT%%XSETGPSPOS=%d,%d,%d",longitude,latitude,altitude);
+    
+	} else {
+		err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_SETGPSPOS);
+	}
     if (err) {
         LOG_ERR("Failed to set XSETGPSPOS, error: %d", err);
         return err;
@@ -440,3 +518,169 @@ int setup_NTN_modem_commands(void) {
 K_THREAD_DEFINE(mwc_data_module_thread_id,
 		MWC_DATA_THREAD_STACK_SIZE,
 		mwc_data_thread, NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
+
+/* Add these defines from the sample */
+#define PI 3.14159265358979323846
+#define EARTH_RADIUS_METERS (6371.0 * 1000.0)
+
+/* Add event handler declarations */
+static void gnss_event_handler(int event);
+static struct nrf_modem_gnss_pvt_data_frame last_pvt;
+static K_SEM_DEFINE(pvt_data_sem, 0, 1);
+static K_SEM_DEFINE(gnss_fix_sem, 0, 1);
+
+/* Update the GNSS event handler */
+static void gnss_event_handler(int event)
+{
+    int retval;
+
+    switch (event) {
+    case NRF_MODEM_GNSS_EVT_PVT:
+        retval = nrf_modem_gnss_read(&last_pvt, sizeof(last_pvt), NRF_MODEM_GNSS_DATA_PVT);
+        if (retval == 0) {
+            LOG_INF("PVT data - Timestamp: %02d:%02d:%02d, Date: %02d-%02d-%04d",
+                   last_pvt.datetime.hour, last_pvt.datetime.minute, 
+                   last_pvt.datetime.seconds,
+                   last_pvt.datetime.day, last_pvt.datetime.month, 
+                   last_pvt.datetime.year);
+            
+            // Fix: Use correct field names from the nRF GNSS API
+            uint8_t tracked = 0;
+            uint8_t in_fix = 0;
+            
+            // Count satellites that are tracked and used in fix
+            for (int i = 0; i < NRF_MODEM_GNSS_MAX_SATELLITES; ++i) {
+                if (last_pvt.sv[i].sv > 0) {
+                    tracked++;
+                    if (last_pvt.sv[i].flags & NRF_MODEM_GNSS_SV_FLAG_USED_IN_FIX) {
+                        in_fix++;
+                    }
+                }
+            }
+            
+            LOG_INF("Satellites tracked: %d, Satellites in fix: %d",
+                   tracked, in_fix);
+				   
+            if (last_pvt.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
+                // Store the fix data in state object
+                mwc_data_state.gnss_fix_valid = true;
+                mwc_data_state.latitude = last_pvt.latitude;
+                mwc_data_state.longitude = last_pvt.longitude;
+                mwc_data_state.altitude = last_pvt.altitude;
+                mwc_data_state.accuracy = last_pvt.accuracy;
+                
+                LOG_INF("GNSS fix obtained - Lat: %.06f, Lon: %.06f, Alt: %.1f m, Accuracy: %.1f m", 
+                       (double)last_pvt.latitude, (double)last_pvt.longitude, 
+                       (double)last_pvt.altitude, (double)last_pvt.accuracy);
+                
+                k_sem_give(&gnss_fix_sem);
+            }
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/* Add GNSS initialization function */
+static int gnss_init(void)
+{
+    /* Enable GNSS */
+    if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS) != 0) {
+        LOG_ERR("Failed to activate GNSS functional mode");
+        return -1;
+    }
+
+    /* Configure GNSS */
+    if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
+        LOG_ERR("Failed to set GNSS event handler");
+        return -1;
+    }
+
+    /* Set fix interval to single fix */
+    if (nrf_modem_gnss_fix_interval_set(0) != 0) {
+        LOG_ERR("Failed to set GNSS fix interval");
+        return -1;
+    }
+
+    /* Set fix retry to 0 for single fix */
+    if (nrf_modem_gnss_fix_retry_set(0) != 0) {
+        LOG_ERR("Failed to set GNSS fix retry");
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Add GNSS start function */
+static int gnss_start(void)
+{
+    if (nrf_modem_gnss_start() != 0) {
+        LOG_ERR("Failed to start GNSS");
+        return -1;
+    }
+    return 0;
+}
+
+/* Add GNSS stop function */
+static int gnss_stop(void)
+{
+    if (nrf_modem_gnss_stop() != 0) {
+        LOG_ERR("Failed to stop GNSS");
+        return -1;
+    }
+    return 0;
+}
+
+/* Add new state handler for GNSS operations */
+static void gnss_active_entry(void *o)
+{
+    struct state_object *user_object = o;
+    
+    // Initialize GNSS state
+    user_object->gnss_fix_valid = false;
+    user_object->gnss_timeout_ms = 0;
+    
+    // Initialize and start GNSS
+    if (gnss_init() != 0) {
+        LOG_ERR("Failed to initialize GNSS");
+        STATE_SET(mwc_data_state, STATE_CLOUD_CONNECTED);
+        return;
+    }
+    
+    if (gnss_start() != 0) {
+        LOG_ERR("Failed to start GNSS");
+        STATE_SET(mwc_data_state, STATE_CLOUD_CONNECTED);
+        return;
+    }
+    
+    LOG_INF("GNSS started");
+}
+
+/* Update the gnss_active_run function */
+static void gnss_active_run(void *o)
+{
+    ARG_UNUSED(o);  // Add this to explicitly mark the parameter as unused
+    
+    // Use a timeout when waiting for the semaphore
+    if (k_sem_take(&gnss_fix_sem, K_SECONDS(360)) == 0) {
+        // We got a fix, clean up GNSS
+        gnss_stop();
+
+        // Transition back to disconnected state
+        STATE_SET(mwc_data_state, STATE_CLOUD_DISCONNECTED);
+
+        // Now it's safe to send the network connect message
+        struct network_msg msg = {
+            .type = NETWORK_CONNECT
+        };
+        int err = zbus_chan_pub(&NETWORK_CHAN, &msg, K_SECONDS(1));
+        if (err) {
+            LOG_ERR("Failed to publish network connect message, error: %d", err);
+            SEND_FATAL_ERROR();
+            return;
+        }
+        LOG_DBG("Published network connect message");
+    }
+}

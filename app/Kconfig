@@ -13,6 +13,12 @@ config APP_PAYLOAD_CHANNEL_BUFFER_MAX_SIZE
 	  Maximum size of the buffer sent over the payload channel.
 	  Contains encoded CBOR data sampled and encoded in the various modules.
 
+config APP_USE_GNSS_FIX
+	bool "Use GNSS fix data"
+	help
+	  If enabled, use actual GNSS fix data for latitude, longitude and accuracy.
+	  If disabled, use configured static values.
+
 rsource "src/modules/battery/Kconfig.battery"
 rsource "src/modules/network/Kconfig.network"
 rsource "src/modules/cloud/Kconfig.cloud"
