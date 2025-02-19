@@ -39,4 +39,46 @@ config APP_MWC_DATA_GPS_ACCURACY
 		GPS accuracy in meters to include in the data output.
 		A value of 0 indicates unknown accuracy.
 
+config APP_NTN_AT_CFUN
+	string "AT command for setting modem functionality"
+	default "AT+CFUN=0"
+	help
+		AT command to set modem to minimum functionality
+
+config APP_NTN_AT_CGDCONT
+	string "AT command for setting APN"
+	default "AT+CGDCONT=0,\"IP\",\"internet.m2mportal.de\""
+	help
+		AT command to set APN for data connection
+
+config APP_NTN_AT_SYSTEMMODE
+	string "AT command for setting system mode"
+	default "AT%XSYSTEMMODE=0,1,0,0"
+	help
+		AT command to set system mode to NB-IoT only
+
+config APP_NTN_AT_EPCO
+	string "AT command for eDRX settings"
+	default "AT%XEPCO=0"
+	help
+		AT command to disable eDRX
+
+config APP_NTN_AT_SETGPSPOS
+	string "AT command for setting GPS position"
+	default "AT%XSETGPSPOS=186260,151512,215000"
+	help
+		AT command to set GPS position
+
+config APP_NTN_AT_NTNFEAT
+	string "AT command for NTN features"
+	default "AT%XNTNFEAT=0,0"
+	help
+		AT command to configure NTN features
+
+config APP_NTN_AT_BANDLOCK
+	string "AT command for band lock"
+	default "AT%XBANDLOCK=2,\"10000000000000000000000000000000000000000000000000000000000000000\""
+	help
+		AT command to set band lock
+
 endif # APP_MWC_DATA 

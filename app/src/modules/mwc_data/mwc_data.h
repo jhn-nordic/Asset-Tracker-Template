@@ -17,6 +17,15 @@
 extern "C" {
 #endif
 
+/**
+ * @brief Setup NTN modem commands
+ *
+ * Configures the modem with NTN-specific AT commands defined in Kconfig
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int setup_NTN_modem_commands(void);
+
 #ifdef __cplusplus
 }
 #endif

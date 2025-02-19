@@ -18,6 +18,7 @@
 #include "modules_common.h"
 #include "message_channel.h"
 #include "network.h"
+#include "../mwc_data/mwc_data.h"
 
 /* Register log module */
 LOG_MODULE_REGISTER(network, CONFIG_APP_NETWORK_LOG_LEVEL);
@@ -409,6 +410,14 @@ static void state_disconnected_searching_entry(void *obj)
 	ARG_UNUSED(obj);
 
 	LOG_DBG("state_disconnected_searching_entry");
+	
+	/* Configure NTN modem before attempting connection */
+	err = setup_NTN_modem_commands();
+	if (err) {
+		LOG_ERR("Failed to configure NTN modem, error: %d", err);
+		SEND_FATAL_ERROR();
+		return;
+	}
 
 	err = conn_mgr_all_if_connect(true);
 	if (err) {

@@ -15,6 +15,8 @@
 #include <zephyr/posix/netdb.h>
 #include <zephyr/posix/unistd.h>
 #include <modem/modem_info.h>
+#include <nrf_modem_at.h>
+#include <nrf_errno.h>
 
 #include "modules_common.h"
 #include "message_channel.h"
@@ -379,6 +381,61 @@ static void mwc_data_thread(void *arg1, void *arg2, void *arg3)
 	}
 }
 
+int setup_NTN_modem_commands(void) {
+    int err;
+
+    /* Set modem to minimum functionality */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_CFUN);
+    if (err) {
+        LOG_ERR("Failed to set CFUN, error: %d", err);
+        return err;
+    }
+
+    /* Set APN for data connection */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_CGDCONT);
+    if (err) {
+        LOG_ERR("Failed to set CGDCONT, error: %d", err);
+        return err;
+    }
+
+    /* Set system mode to NB-IoT only */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_SYSTEMMODE);
+    if (err) {
+        LOG_ERR("Failed to set XSYSTEMMODE, error: %d", err);
+        return err;
+    }
+
+    /* Disable eDRX */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_EPCO);
+    if (err) {
+        LOG_ERR("Failed to set XEPCO, error: %d", err);
+        return err;
+    }
+
+    /* Set GPS position */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_SETGPSPOS);
+    if (err) {
+        LOG_ERR("Failed to set XSETGPSPOS, error: %d", err);
+        return err;
+    }
+
+    /* Configure NTN features */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_NTNFEAT);
+    if (err) {
+        LOG_ERR("Failed to set XNTNFEAT, error: %d", err);
+        return err;
+    }
+
+    /* Set band lock */
+    err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_BANDLOCK);
+    if (err) {
+        LOG_ERR("Failed to set XBANDLOCK, error: %d", err);
+        return err;
+    }
+
+    LOG_INF("NTN modem configuration completed successfully");
+    return 0;
+}
 
 K_THREAD_DEFINE(mwc_data_module_thread_id,
 		MWC_DATA_THREAD_STACK_SIZE,
