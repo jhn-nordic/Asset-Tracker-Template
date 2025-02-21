@@ -42,21 +42,18 @@ static uint16_t calculate_checksum(const void *buf, int len)
 int64_t perform_ping(void)
 {
 	const char *target = "8.8.8.8";
-	struct addrinfo hints;
-	struct addrinfo *res = NULL;
 	int ret;
 	int sock = -1;
 	int64_t result = -1;
+	struct sockaddr_in dest_addr = {
+		.sin_family = AF_INET,
+		.sin_port = 0  // Not used for ICMP
+	};
 
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;          // IPv4 address
-	hints.ai_socktype = SOCK_RAW;
-	hints.ai_protocol = IPPROTO_ICMP;
-
-	ret = getaddrinfo(target, NULL, &hints, &res);
-	if (ret != 0) {
-		LOG_ERR("getaddrinfo() failed: %d", ret);
-		goto cleanup;
+	// Convert the target IP directly
+	if (inet_pton(AF_INET, target, &dest_addr.sin_addr) != 1) {
+		LOG_ERR("Failed to convert target IP address");
+		return -1;
 	}
 
 	sock = socket(AF_PACKET, SOCK_RAW, 0);
@@ -103,9 +100,8 @@ int64_t perform_ping(void)
 	}
 	memcpy(buf + 12, &src_ip.s_addr, 4);
 
-	// Destination IP address
-	struct sockaddr_in *dest = (struct sockaddr_in *)res->ai_addr;
-	memcpy(buf + 16, &dest->sin_addr.s_addr, 4);
+	// Destination IP address (8.8.8.8)
+	memcpy(buf + 16, &dest_addr.sin_addr.s_addr, 4);
 
 	// Calculate IPv4 header checksum
 	buf[10] = 0;
@@ -155,9 +151,6 @@ int64_t perform_ping(void)
 cleanup:
 	if (sock >= 0) {
 		close(sock);
-	}
-	if (res != NULL) {
-		freeaddrinfo(res);
 	}
 	return result;
 } 
