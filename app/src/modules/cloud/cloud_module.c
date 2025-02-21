@@ -130,6 +130,14 @@ static int client_fd;
 #define SERVER_ADDR CONFIG_APP_CLOUD_SERVER_ADDR      // Cloud server address from Kconfig
 static int sock_fd = -1;
 
+static void cleanup_socket(void)
+{
+	if (client_fd >= 0) {
+		(void)close(client_fd);
+		client_fd = -1;
+	}
+}
+
 static int udp_init(void)
 {
 	int err=0;
@@ -147,6 +155,10 @@ static int udp_init(void)
 static int udp_connect(const char *version)
 {
 	int err;
+	
+	// Clean up any existing socket first
+	cleanup_socket();
+	
 	client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (client_fd < 0) {
 		LOG_ERR("client_fd: %d\n\r", client_fd);
@@ -380,12 +392,14 @@ static void state_disconnected_entry(void *o)
 	ARG_UNUSED(o);
 
 	LOG_DBG("%s", __func__);
+	
+	// Clean up socket when disconnecting
+	cleanup_socket();
 
 	err = zbus_chan_pub(&CLOUD_CHAN, &cloud_status, K_SECONDS(1));
 	if (err) {
 		LOG_ERR("zbus_chan_pub, error: %d", err);
 		SEND_FATAL_ERROR();
-
 		return;
 	}
 }
@@ -484,10 +498,7 @@ static void state_connected_exit(void *o)
 
 	LOG_DBG("%s", __func__);
 
-	if (sock_fd >= 0) {
-		close(sock_fd);
-		sock_fd = -1;
-	}
+	cleanup_socket();
 }
 
 /* Handlers for STATE_CONNECTED_READY */
@@ -576,11 +587,13 @@ static void state_connected_paused_entry(void *o)
 
 	LOG_DBG("%s", __func__);
 
+	// Clean up socket when network connection is lost
+	cleanup_socket();
+
 	err = zbus_chan_pub(&CLOUD_CHAN, &cloud_status, K_SECONDS(1));
 	if (err) {
 		LOG_ERR("zbus_chan_pub, error: %d", err);
 		SEND_FATAL_ERROR();
-
 		return;
 	}
 }
