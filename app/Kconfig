@@ -19,6 +19,12 @@ config APP_USE_GNSS_FIX
 	  If enabled, use actual GNSS fix data for latitude, longitude and accuracy.
 	  If disabled, use configured static values.
 
+config APP_NTN
+	bool "Enable NTN support"
+	default y
+	help
+	  Enable Non-Terrestrial Network (NTN) support for satellite connectivity.
+
 rsource "src/modules/battery/Kconfig.battery"
 rsource "src/modules/network/Kconfig.network"
 rsource "src/modules/cloud/Kconfig.cloud"

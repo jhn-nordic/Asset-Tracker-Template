@@ -45,6 +45,8 @@ int64_t perform_ping(void)
 	struct addrinfo hints;
 	struct addrinfo *res = NULL;
 	int ret;
+	int sock = -1;
+	int64_t result = -1;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;          // IPv4 address
@@ -54,14 +56,13 @@ int64_t perform_ping(void)
 	ret = getaddrinfo(target, NULL, &hints, &res);
 	if (ret != 0) {
 		LOG_ERR("getaddrinfo() failed: %d", ret);
-		return -1;
+		goto cleanup;
 	}
 
-	int sock = socket(AF_PACKET, SOCK_RAW, 0);
+	sock = socket(AF_PACKET, SOCK_RAW, 0);
 	if (sock < 0) {
 		LOG_ERR("Failed to create socket: %d", -errno);
-		freeaddrinfo(res);
-		return -1;
+		goto cleanup;
 	}
 
 	// Set the receive timeout to 30 seconds
@@ -91,18 +92,14 @@ int64_t perform_ping(void)
 	ret = modem_info_string_get(MODEM_INFO_IP_ADDRESS, src_addr, NET_IPV4_ADDR_LEN);
 	if (ret < 0) {
 		LOG_ERR("Failed to get source IP address: %d", ret);
-		close(sock);
-		freeaddrinfo(res);
-		return -1;
+		goto cleanup;
 	}
 
 	// Convert IP string to bytes
 	struct in_addr src_ip;
 	if (inet_pton(AF_INET, src_addr, &src_ip) != 1) {
 		LOG_ERR("Failed to convert source IP address");
-		close(sock);
-		freeaddrinfo(res);
-		return -1;
+		goto cleanup;
 	}
 	memcpy(buf + 12, &src_ip.s_addr, 4);
 
@@ -134,9 +131,7 @@ int64_t perform_ping(void)
 	ret = send(sock, buf, sizeof(buf), 0);
 	if (ret < 0) {
 		LOG_ERR("send() failed: %d", -errno);
-		close(sock);
-		freeaddrinfo(res);
-		return -1;
+		goto cleanup;
 	}
 
 	uint8_t recv_buf[64];
@@ -145,24 +140,24 @@ int64_t perform_ping(void)
 	ret = recvfrom(sock, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&addr, &addr_len);
 	if (ret < 0) {
 		LOG_ERR("recvfrom() failed or timed out: %d", -errno);
-		close(sock);
-		freeaddrinfo(res);
-		return -1;
+		goto cleanup;
 	}
 
 	// Check if the received packet is an ICMP Echo Reply
 	if (ret >= (IP_HDR_LEN + ICMP_HDR_LEN)) {
 		uint8_t *icmp_reply = recv_buf + IP_HDR_LEN;
 		if (icmp_reply[0] == 0) { // ICMP Echo Reply
-			int64_t rtt = k_uptime_delta(&start_time);
-			LOG_INF("Ping reply from %s: RTT = %lld ms", target, rtt);
-			close(sock);
-			freeaddrinfo(res);
-			return rtt;
+			result = k_uptime_delta(&start_time);
+			LOG_INF("Ping reply from %s: RTT = %lld ms", target, result);
 		}
 	}
 
-	close(sock);
-	freeaddrinfo(res);
-	return -1;
+cleanup:
+	if (sock >= 0) {
+		close(sock);
+	}
+	if (res != NULL) {
+		freeaddrinfo(res);
+	}
+	return result;
 } 

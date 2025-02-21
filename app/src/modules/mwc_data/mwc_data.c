@@ -388,21 +388,27 @@ static void mwc_data_callback(const struct zbus_channel *chan)
 	int err;
 #if defined(CONFIG_APP_BATTERY)
 	if (chan == &BATTERY_CHAN) {
-
 		const struct battery_msg *msg = zbus_chan_const_msg(chan);
-		latest_battery_msg = *msg;  // store the battery reading
-		battery_data_valid = true;
-		LOG_DBG("Updated battery data: percentage=%.2f", msg->percentage);
-
+		
+		// Only update battery data if it's a response with sample data
+		if (msg->type == BATTERY_PERCENTAGE_SAMPLE_RESPONSE) {
+			latest_battery_msg = *msg;  // store the battery reading
+			battery_data_valid = true;
+			LOG_DBG("Updated battery data: percentage=%.2f", msg->percentage);
+		}
 		return;
 	}
 #endif
 	if (chan == &ENVIRONMENTAL_CHAN) {
 		const struct environmental_msg *msg = zbus_chan_const_msg(chan);
-		latest_env_msg = *msg;  // store the environmental reading
-		env_data_valid = true;
-		LOG_DBG("Updated environmental data: temp=%.2f, pressure=%.2f, humidity=%.2f",
-			msg->temperature, msg->pressure, msg->humidity);
+		
+		// Only update environmental data if it's a response with sample data
+		if (msg->type == ENVIRONMENTAL_SENSOR_SAMPLE_RESPONSE) {
+			latest_env_msg = *msg;  // store the environmental reading
+			env_data_valid = true;
+			LOG_DBG("Updated environmental data: temp=%.2f, pressure=%.2f, humidity=%.2f",
+				msg->temperature, msg->pressure, msg->humidity);
+		}
 		return;
 	}
 
@@ -483,15 +489,15 @@ int setup_NTN_modem_commands(void) {
     }
 
     /* Set GPS position */
-	if (CONFIG_APP_USE_GNSS_FIX) {
+	#if defined(CONFIG_APP_USE_GNSS_FIX)
 		int latitude = (int)(mwc_data_state.latitude * 1000)+90000;
 		int longitude = (int)(mwc_data_state.longitude * 1000)+180000;
 		int altitude = (int)(mwc_data_state.altitude * 1000);
 		err = nrf_modem_at_printf("AT%%XSETGPSPOS=%d,%d,%d",longitude,latitude,altitude);
-    
-	} else {
+	#else
 		err = nrf_modem_at_printf(CONFIG_APP_NTN_AT_SETGPSPOS);
-	}
+	#endif
+
     if (err) {
         LOG_ERR("Failed to set XSETGPSPOS, error: %d", err);
         return err;
@@ -638,6 +644,7 @@ static void gnss_active_entry(void *o)
 {
     struct state_object *user_object = o;
     
+#if defined(CONFIG_APP_USE_GNSS_FIX)
     // Initialize GNSS state
     user_object->gnss_fix_valid = false;
     user_object->gnss_timeout_ms = 0;
@@ -656,13 +663,33 @@ static void gnss_active_entry(void *o)
     }
     
     LOG_INF("GNSS started");
+#else
+    // When GNSS fix is not enabled, immediately transition and send network connect
+    LOG_INF("GNSS fix disabled, skipping GNSS search");
+    
+    // Transition back to disconnected state
+    STATE_SET(mwc_data_state, STATE_CLOUD_DISCONNECTED);
+
+    // Send the network connect message
+    struct network_msg msg = {
+        .type = NETWORK_CONNECT
+    };
+    int err = zbus_chan_pub(&NETWORK_CHAN, &msg, K_SECONDS(1));
+    if (err) {
+        LOG_ERR("Failed to publish network connect message, error: %d", err);
+        SEND_FATAL_ERROR();
+        return;
+    }
+    LOG_DBG("Published network connect message");
+#endif
 }
 
 /* Update the gnss_active_run function */
 static void gnss_active_run(void *o)
 {
-    ARG_UNUSED(o);  // Add this to explicitly mark the parameter as unused
+    ARG_UNUSED(o);
     
+#if defined(CONFIG_APP_USE_GNSS_FIX)
     // Use a timeout when waiting for the semaphore
     if (k_sem_take(&gnss_fix_sem, K_SECONDS(360)) == 0) {
         // We got a fix, clean up GNSS
@@ -683,4 +710,5 @@ static void gnss_active_run(void *o)
         }
         LOG_DBG("Published network connect message");
     }
+#endif
 }

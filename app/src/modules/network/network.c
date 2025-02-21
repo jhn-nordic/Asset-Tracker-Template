@@ -420,12 +420,14 @@ static void state_disconnected_searching_entry(void *obj)
 
 	LOG_DBG("state_disconnected_searching_entry");
 	
-	/* Configure NTN modem before attempting connection */
-	err = setup_NTN_modem_commands();
-	if (err) {
-		LOG_ERR("Failed to configure NTN modem, error: %d", err);
-		SEND_FATAL_ERROR();
-		return;
+	if (IS_ENABLED(CONFIG_APP_NTN)) {
+		/* Configure NTN modem before attempting connection */
+		err = setup_NTN_modem_commands();
+		if (err) {
+			LOG_ERR("Failed to configure NTN modem, error: %d", err);
+			SEND_FATAL_ERROR();
+			return;
+		}
 	}
 
 	err = conn_mgr_all_if_connect(true);
