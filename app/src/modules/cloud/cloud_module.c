@@ -128,12 +128,12 @@ static int client_fd;
 /* Add UDP socket definitions */
 #define SERVER_PORT CONFIG_APP_CLOUD_SERVER_PORT  // Standard CoAP port from Kconfig
 #define SERVER_ADDR CONFIG_APP_CLOUD_SERVER_ADDR      // Cloud server address from Kconfig
-static int sock_fd = -1;
 
 static void cleanup_socket(void)
 {
 	if (client_fd >= 0) {
 		(void)close(client_fd);
+		LOG_INF("Socket closed: %d", client_fd);
 		client_fd = -1;
 	}
 }
@@ -164,6 +164,7 @@ static int udp_connect(const char *version)
 		LOG_ERR("client_fd: %d\n\r", client_fd);
 		return client_fd;
 	}
+	LOG_INF("Socket created: %d", client_fd);
 	err = bind(client_fd, (struct sockaddr *)&local_addr,
 		   sizeof(local_addr));
 	if (err < 0) {
