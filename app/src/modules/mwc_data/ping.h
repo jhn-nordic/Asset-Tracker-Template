@@ -18,4 +18,16 @@
  */
 int64_t perform_ping(void);
 
+/**
+ * @brief Open a persistent socket for ping operations
+ *
+ * @return 0 on success, negative errno on failure
+ */
+int open_ping_socket(void);
+
+/**
+ * @brief Close the persistent ping socket
+ */
+void close_ping_socket(void);
+
 #endif /* PING_H_ */ 

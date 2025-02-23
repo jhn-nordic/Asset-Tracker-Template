@@ -181,6 +181,13 @@ static void cloud_connected_entry(void *o)
 {
 	ARG_UNUSED(o);
 	LOG_DBG("%s", __func__);
+
+	// Open ping socket when entering connected state
+	if (open_ping_socket() != 0) {
+		LOG_ERR("Failed to open ping socket");
+		SEND_FATAL_ERROR();
+		return;
+	}
 }
 
 
@@ -360,6 +367,9 @@ static void cloud_disconnected_entry(void *o)
 {
 	ARG_UNUSED(o);
 	LOG_DBG("%s", __func__);
+
+	// Close ping socket when entering disconnected state
+	close_ping_socket();
 }
 
 static void cloud_disconnected_run(void *o)
