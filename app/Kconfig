@@ -1,0 +1,20 @@
+#
+# Copyright (c) 2024 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "Asset Tracker Template"
+
+# Bootloader images do not source this file, so the modules build only into the application.
+config ATT_MODULES
+	default y
+
+rsource "src/Kconfig.main"
+rsource "memfault/Kconfig.memfault"
+
+endmenu
+
+menu "Zephyr Kernel"
+source "Kconfig.zephyr"
+endmenu
