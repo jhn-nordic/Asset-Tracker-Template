@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+#include <stdlib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/zbus/zbus.h>
@@ -12,8 +13,12 @@
 #include <zephyr/task_wdt/task_wdt.h>
 #include <zephyr/smf.h>
 #include <date_time.h>
+#include <net/nrf_cloud.h>
 
 #include "app_common.h"
+#include "cloud.h"
+#include "cloud_storage_sender.h"
+#include "storage.h"
 #include "soil_sensor.h"
 
 /* Register log module */
@@ -27,6 +32,61 @@ ZBUS_CHAN_DEFINE(soil_sensor_chan,
 		 ZBUS_OBSERVERS_EMPTY,
 		 ZBUS_MSG_INIT(0)
 );
+
+/* Storage type id of soil samples, from the application range of storage type ids */
+#define STORAGE_TYPE_SOIL 32
+
+static bool soil_check(const struct soil_sensor_msg *msg)
+{
+	return msg->type == SOIL_SENSOR_SAMPLE_RESPONSE;
+}
+
+static void soil_extract(const struct soil_sensor_msg *msg, struct soil_sensor_msg *data)
+{
+	*data = *msg;
+}
+
+STORAGE_DATA_TYPE_ADD(SOIL, STORAGE_TYPE_SOIL, soil_sensor_chan, struct soil_sensor_msg,
+		      struct soil_sensor_msg, soil_check, soil_extract);
+
+static int soil_send(const void *data, size_t len)
+{
+	int err;
+	int json_len;
+	const struct soil_sensor_msg *soil = data;
+	int temperature_dc = soil->temperature_dc;
+	int64_t timestamp_ms = soil->timestamp;
+	char ts[32] = "";
+	char json[96];
+
+	err = cloud_storage_timestamp_fixup(&timestamp_ms);
+	if (err) {
+		return err;
+	}
+
+	if (timestamp_ms != NRF_CLOUD_NO_TIMESTAMP) {
+		snprintk(ts, sizeof(ts), ",\"ts\":%lld", timestamp_ms);
+	}
+
+	json_len = snprintk(json, sizeof(json),
+			    "{\"appId\":\"SOIL\",\"moisture\":%u,\"temp\":%s%d.%d%s}",
+			    soil->moisture_pct, temperature_dc < 0 ? "-" : "",
+			    abs(temperature_dc) / 10, abs(temperature_dc) % 10, ts);
+	if (json_len < 0 || (size_t)json_len >= sizeof(json)) {
+		LOG_ERR("Soil sensor payload does not fit the JSON buffer");
+		return -EINVAL;
+	}
+
+	err = cloud_json_message_send(json);
+	if (err) {
+		LOG_ERR("cloud_json_message_send, error: %d", err);
+		return err;
+	}
+
+	return 0;
+}
+
+CLOUD_STORAGE_SENDER_DEFINE(STORAGE_TYPE_SOIL, struct soil_sensor_msg, soil_send);
 
 /* Register subscriber */
 ZBUS_MSG_SUBSCRIBER_DEFINE(soil_sensor);

@@ -5,7 +5,6 @@
  */
 
 #include <stdint.h>
-#include <stdlib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/zbus/zbus.h>
@@ -459,37 +458,6 @@ static void trigger_sampling(struct main_state *state_object)
 	err = zbus_chan_pub(&soil_sensor_chan, &soil_sensor_msg, PUB_TIMEOUT);
 	if (err) {
 		LOG_ERR("Failed to publish soil sensor sample request, error: %d", err);
-		SEND_FATAL_ERROR();
-
-		return;
-	}
-}
-
-static void soil_sensor_data_send(const struct soil_sensor_msg *soil_msg)
-{
-	int err;
-	int len;
-	int temperature_dc = soil_msg->temperature_dc;
-	struct cloud_msg cloud_msg = {
-		.type = CLOUD_PAYLOAD_JSON,
-	};
-
-	len = snprintk((char *)cloud_msg.payload.buffer, sizeof(cloud_msg.payload.buffer),
-		       "{\"appId\":\"SOIL\",\"moisture\":%u,\"temp\":%s%d.%d}",
-		       soil_msg->moisture_pct, temperature_dc < 0 ? "-" : "",
-		       abs(temperature_dc) / 10, abs(temperature_dc) % 10);
-	if (len < 0 || (size_t)len >= sizeof(cloud_msg.payload.buffer)) {
-		LOG_ERR("Soil sensor payload does not fit the cloud payload buffer");
-		SEND_FATAL_ERROR();
-
-		return;
-	}
-
-	cloud_msg.payload.buffer_data_len = len;
-
-	err = zbus_chan_pub(&cloud_chan, &cloud_msg, PUB_TIMEOUT);
-	if (err) {
-		LOG_ERR("Failed to publish soil sensor payload, error: %d", err);
 		SEND_FATAL_ERROR();
 
 		return;
@@ -1103,7 +1071,6 @@ static enum smf_state_result disconnected_sampling_run(void *o)
 			(const struct soil_sensor_msg *)state_object->msg_buf;
 
 		if (msg->type == SOIL_SENSOR_SAMPLE_RESPONSE) {
-			LOG_DBG("Dropping soil sensor sample, cloud is disconnected");
 			smf_set_state(SMF_CTX(state_object), &states[STATE_DISCONNECTED_WAITING]);
 
 			return SMF_EVENT_HANDLED;
@@ -1211,7 +1178,6 @@ static enum smf_state_result connected_sampling_run(void *o)
 			(const struct soil_sensor_msg *)state_object->msg_buf;
 
 		if (msg->type == SOIL_SENSOR_SAMPLE_RESPONSE) {
-			soil_sensor_data_send(msg);
 			smf_set_state(SMF_CTX(state_object), &states[STATE_CONNECTED_WAITING]);
 			return SMF_EVENT_HANDLED;
 		}
