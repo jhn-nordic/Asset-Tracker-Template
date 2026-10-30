@@ -43,6 +43,13 @@ struct soil_sensor_msg {
 
 	/** Soil temperature in tenths of a degree Celsius. */
 	int16_t temperature_dc;
+
+	/** Timestamp when the sample was taken in milliseconds.
+	 *  This is either:
+	 * - Unix time in milliseconds if the system clock was synchronized at sampling time, or
+	 * - Uptime in milliseconds if the system clock was not synchronized at sampling time.
+	 */
+	int64_t timestamp;
 };
 
 #ifdef __cplusplus

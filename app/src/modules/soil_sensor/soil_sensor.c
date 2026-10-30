@@ -11,6 +11,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/task_wdt/task_wdt.h>
 #include <zephyr/smf.h>
+#include <date_time.h>
 
 #include "app_common.h"
 #include "soil_sensor.h"
@@ -101,7 +102,15 @@ static void sample_sensors(struct soil_sensor_state_object *state_object)
 		.type = SOIL_SENSOR_SAMPLE_RESPONSE,
 		.moisture_pct = (uint8_t)state_object->moisture_pct,
 		.temperature_dc = (int16_t)state_object->temperature_dc,
+		.timestamp = k_uptime_get(),
 	};
+
+	err = date_time_now(&msg.timestamp);
+	if (err != 0 && err != -ENODATA) {
+		LOG_ERR("date_time_now, error: %d", err);
+		SEND_FATAL_ERROR();
+		return;
+	}
 
 	LOG_DBG("Moisture: %d %%, Temperature: %d dC", msg.moisture_pct, msg.temperature_dc);
 
