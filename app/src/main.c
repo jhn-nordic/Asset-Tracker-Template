@@ -5,6 +5,7 @@
  */
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/zbus/zbus.h>
@@ -16,8 +17,8 @@
 #include "network.h"
 #include "cloud.h"
 #include "fota.h"
-#include "location.h"
 #include "storage.h"
+#include "soil_sensor.h"
 #include "cbor_helper.h"
 
 #if defined(CONFIG_APP_BUTTON)
@@ -98,7 +99,7 @@ ZBUS_CHAN_DEFINE(priv_main_chan,
 	X(cloud_chan,		struct cloud_msg)		\
 	X(fota_chan,		struct fota_msg)		\
 	X(network_chan,		struct network_msg)		\
-	X(location_chan,	struct location_msg)		\
+	X(soil_sensor_chan,	struct soil_sensor_msg)		\
 	X(storage_chan,		struct storage_msg)		\
 	X(timer_chan,		struct timer_msg)		\
 	X(priv_main_chan,	struct priv_main_msg)		\
@@ -237,7 +238,6 @@ struct main_state {
 #if defined(CONFIG_APP_POWER)
 		bool power_ready;
 #endif /* CONFIG_APP_POWER */
-		bool location_ready;
 	} modules_ready;
 };
 
@@ -400,8 +400,8 @@ static void handle_fota_reboot_request(struct main_state *state_object)
 static void trigger_sampling(struct main_state *state_object)
 {
 	int err;
-	struct location_msg location_msg = {
-		.type = LOCATION_SEARCH_TRIGGER,
+	struct soil_sensor_msg soil_sensor_msg = {
+		.type = SOIL_SENSOR_SAMPLE_REQUEST,
 	};
 
 #if defined(CONFIG_APP_LED)
@@ -456,9 +456,40 @@ static void trigger_sampling(struct main_state *state_object)
 	}
 #endif /* CONFIG_APP_ENVIRONMENTAL */
 
-	err = zbus_chan_pub(&location_chan, &location_msg, PUB_TIMEOUT);
+	err = zbus_chan_pub(&soil_sensor_chan, &soil_sensor_msg, PUB_TIMEOUT);
 	if (err) {
-		LOG_ERR("Failed to publish location search trigger, error: %d", err);
+		LOG_ERR("Failed to publish soil sensor sample request, error: %d", err);
+		SEND_FATAL_ERROR();
+
+		return;
+	}
+}
+
+static void soil_sensor_data_send(const struct soil_sensor_msg *soil_msg)
+{
+	int err;
+	int len;
+	int temperature_dc = soil_msg->temperature_dc;
+	struct cloud_msg cloud_msg = {
+		.type = CLOUD_PAYLOAD_JSON,
+	};
+
+	len = snprintk((char *)cloud_msg.payload.buffer, sizeof(cloud_msg.payload.buffer),
+		       "{\"appId\":\"SOIL\",\"moisture\":%u,\"temp\":%s%d.%d}",
+		       soil_msg->moisture_pct, temperature_dc < 0 ? "-" : "",
+		       abs(temperature_dc) / 10, abs(temperature_dc) % 10);
+	if (len < 0 || (size_t)len >= sizeof(cloud_msg.payload.buffer)) {
+		LOG_ERR("Soil sensor payload does not fit the cloud payload buffer");
+		SEND_FATAL_ERROR();
+
+		return;
+	}
+
+	cloud_msg.payload.buffer_data_len = len;
+
+	err = zbus_chan_pub(&cloud_chan, &cloud_msg, PUB_TIMEOUT);
+	if (err) {
+		LOG_ERR("Failed to publish soil sensor payload, error: %d", err);
 		SEND_FATAL_ERROR();
 
 		return;
@@ -800,17 +831,21 @@ static void check_modules_ready(const struct main_state *state_object)
 	const struct priv_main_msg msg = { .type = MAIN_MODULES_READY };
 	int err;
 
-	if (state_object->modules_ready.fota_ready &&
+	if (!state_object->modules_ready.fota_ready) {
+		return;
+	}
+
 #if defined(CONFIG_APP_POWER)
-	    state_object->modules_ready.power_ready &&
+	if (!state_object->modules_ready.power_ready) {
+		return;
+	}
 #endif /* CONFIG_APP_POWER */
-	    state_object->modules_ready.location_ready) {
-		err = zbus_chan_pub(&priv_main_chan, &msg, PUB_TIMEOUT);
-		if (err) {
-			LOG_ERR("Failed to publish MAIN_MODULES_READY message, error: %d", err);
-			SEND_FATAL_ERROR();
-			return;
-		}
+
+	err = zbus_chan_pub(&priv_main_chan, &msg, PUB_TIMEOUT);
+	if (err) {
+		LOG_ERR("Failed to publish MAIN_MODULES_READY message, error: %d", err);
+		SEND_FATAL_ERROR();
+		return;
 	}
 }
 
@@ -850,14 +885,6 @@ static enum smf_state_result waiting_for_modules_init_run(void *o)
 			return SMF_EVENT_HANDLED;
 		}
 #endif /* CONFIG_APP_POWER */
-	} else if (state_object->chan == &location_chan) {
-		const struct location_msg *msg = (const struct location_msg *)state_object->msg_buf;
-
-		if (msg->type == LOCATION_MODULE_READY) {
-			state_object->modules_ready.location_ready = true;
-			check_modules_ready(state_object);
-			return SMF_EVENT_HANDLED;
-		}
 
 	/* If all modules are ready, we can transition to the running state. */
 	} else if (state_object->chan == &priv_main_chan) {
@@ -1071,10 +1098,12 @@ static enum smf_state_result disconnected_sampling_run(void *o)
 {
 	struct main_state *state_object = (struct main_state *)o;
 
-	if (state_object->chan == &location_chan) {
-		const struct location_msg *msg = (const struct location_msg *)state_object->msg_buf;
+	if (state_object->chan == &soil_sensor_chan) {
+		const struct soil_sensor_msg *msg =
+			(const struct soil_sensor_msg *)state_object->msg_buf;
 
-		if (msg->type == LOCATION_SEARCH_DONE) {
+		if (msg->type == SOIL_SENSOR_SAMPLE_RESPONSE) {
+			LOG_DBG("Dropping soil sensor sample, cloud is disconnected");
 			smf_set_state(SMF_CTX(state_object), &states[STATE_DISCONNECTED_WAITING]);
 
 			return SMF_EVENT_HANDLED;
@@ -1177,10 +1206,12 @@ static enum smf_state_result connected_sampling_run(void *o)
 {
 	struct main_state *state_object = (struct main_state *)o;
 
-	if (state_object->chan == &location_chan) {
-		const struct location_msg *msg = (const struct location_msg *)state_object->msg_buf;
+	if (state_object->chan == &soil_sensor_chan) {
+		const struct soil_sensor_msg *msg =
+			(const struct soil_sensor_msg *)state_object->msg_buf;
 
-		if (msg->type == LOCATION_SEARCH_DONE) {
+		if (msg->type == SOIL_SENSOR_SAMPLE_RESPONSE) {
+			soil_sensor_data_send(msg);
 			smf_set_state(SMF_CTX(state_object), &states[STATE_CONNECTED_WAITING]);
 			return SMF_EVENT_HANDLED;
 		}
