@@ -1,0 +1,25 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "ATT modules"
+
+rsource "modules/power/Kconfig.power"
+rsource "modules/uart_power_control/Kconfig.uart_power_control"
+rsource "modules/network/Kconfig.network"
+rsource "modules/cloud/Kconfig.cloud"
+rsource "modules/location/Kconfig.location"
+rsource "modules/led/Kconfig.led"
+rsource "modules/fota/Kconfig.fota"
+rsource "modules/environmental/Kconfig.environmental"
+rsource "modules/button/Kconfig.button"
+rsource "modules/storage/Kconfig.storage"
+
+# Log level for common/ and cbor/, also used by the application's main module.
+module = APP
+module-str = APP
+source "subsys/logging/Kconfig.template.log_config"
+
+endmenu
