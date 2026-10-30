@@ -7,6 +7,7 @@
 #ifndef _STORAGE_DATA_TYPES_H_
 #define _STORAGE_DATA_TYPES_H_
 
+#include <stddef.h>
 #include <zephyr/zbus/zbus.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/ring_buffer.h>
@@ -177,7 +178,8 @@ enum storage_data_type {
  */
 union storage_data_type_buf {
 	DATA_SOURCE_LIST(_STORAGE_DATA_TYPE_MEMBER)
-	uint8_t raw[STORAGE_MAX_DATA_SIZE];
+	/* Aligned for any data type, also when no built-in member sets the alignment */
+	uint8_t raw[STORAGE_MAX_DATA_SIZE] __aligned(__alignof__(max_align_t));
 };
 
 /* Storage module subscriber, added as an observer by each STORAGE_DATA_TYPE_ADD() */
