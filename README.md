@@ -14,24 +14,29 @@ It starts from the [tracker application](https://github.com/jhn-nordic/Asset-Tra
 
 Each sample period, `main.c` requests a soil sample together with the battery and environmental samples.
 The soil sample response ends the sampling state, which the location search did in the tracker.
-When the cloud is connected, `main.c` sends the sample to nRF Cloud as a `CLOUD_PAYLOAD_JSON` message:
-
-```json
-{"appId":"SOIL","moisture":42,"temp":15.3}
-```
-
-When the cloud is disconnected, `main.c` drops the sample.
 
 On the Thingy:91 X, the nRF70 Wi-Fi driver is still enabled, because the board overlay and `Kconfig.sysbuild` enable it.
 Nothing in this application uses Wi-Fi.
 
-## Known gap: the storage and cloud registry
+## Soil samples in storage
 
-The storage module buffers samples through `DATA_SOURCE_LIST` in `att-modules/modules/storage/storage_data_types.h`.
-The cloud module encodes each buffered type in `att-modules/modules/cloud/cloud.c`.
-Both lists are central, so an application module cannot add a data type without editing `att-modules`.
-For this reason, soil samples bypass storage and go straight to the cloud module, and the application cannot buffer them while disconnected.
-A registry that applications can extend would remove this gap.
+The soil sensor module registers its samples with the storage and cloud registries of `att-modules`, from `soil_sensor.c` in this repository:
+
+* `STORAGE_DATA_TYPE_ADD()` registers `struct soil_sensor_msg` as storage type 32 on `soil_sensor_chan`.
+  The storage module then stores each `SOIL_SENSOR_SAMPLE_RESPONSE`, also while the cloud is disconnected.
+* `CLOUD_STORAGE_SENDER_DEFINE()` registers the function that sends a stored sample to nRF Cloud.
+  The cloud module calls it for each soil sample in a storage batch.
+* `prj.conf` sets `CONFIG_APP_STORAGE_EXT_MAX_DATA_SIZE` to the size of `struct soil_sensor_msg`.
+  On the nRF9151 DK, no built-in storage type is enabled, so the storage buffers would otherwise have no room for the sample.
+
+Soil samples follow the storage threshold and batch sending, like the battery and environmental samples.
+The sender sends each sample as a JSON message, with the sample time in unix time milliseconds in `ts`:
+
+```json
+{"appId":"SOIL","moisture":42,"temp":15.3,"ts":1767225600000}
+```
+
+`main.c` does not send soil samples itself.
 
 ## Set up the workspace
 
