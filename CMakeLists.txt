@@ -11,7 +11,7 @@ endif()
 zephyr_include_directories(common)
 
 # Modules include each other's headers even when the included module is disabled,
-# for example storage including location.h.
+# for example cloud including storage.h.
 target_include_directories(app PRIVATE
 	modules/button
 	modules/cloud

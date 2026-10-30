@@ -21,7 +21,9 @@
 #include "cloud_internal.h"
 #include "cloud_configuration.h"
 #include "cloud_provisioning.h"
+#ifdef CONFIG_APP_LOCATION
 #include "cloud_location.h"
+#endif /* CONFIG_APP_LOCATION */
 #ifdef CONFIG_APP_ENVIRONMENTAL
 #include "cloud_environmental.h"
 #endif /* CONFIG_APP_ENVIRONMENTAL */
