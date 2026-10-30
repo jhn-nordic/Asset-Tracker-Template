@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menuconfig APP_SOIL_SENSOR
+	bool "Soil sensor module"
+	default y
+	help
+	  Mock soil sensor that reports moisture and temperature as a bounded random walk.
+
+if APP_SOIL_SENSOR
+
+config APP_SOIL_SENSOR_THREAD_STACK_SIZE
+	int "Thread stack size"
+	default 1024
+
+config APP_SOIL_SENSOR_WATCHDOG_TIMEOUT_SECONDS
+	int "Watchdog timeout"
+	default 120
+	help
+	  Timeout in seconds for the soil sensor module watchdog.
+	  The timeout given in this option covers both:
+	    * Waiting for an incoming message in zbus_sub_wait_msg().
+	    * Time spent processing the message, defined by
+	      CONFIG_APP_SOIL_SENSOR_MSG_PROCESSING_TIMEOUT_SECONDS.
+	  Ensure that this value exceeds CONFIG_APP_SOIL_SENSOR_MSG_PROCESSING_TIMEOUT_SECONDS.
+
+config APP_SOIL_SENSOR_MSG_PROCESSING_TIMEOUT_SECONDS
+	int "Maximum message processing time"
+	default 3
+	help
+	  Maximum time allowed for processing a single message in the module's state machine.
+	  The value must be smaller than CONFIG_APP_SOIL_SENSOR_WATCHDOG_TIMEOUT_SECONDS.
+
+module = APP_SOIL_SENSOR
+module-str = SOIL_SENSOR
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # APP_SOIL_SENSOR

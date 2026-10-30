@@ -14,3 +14,5 @@ zephyr_include_directories(memfault/config)
 target_sources(app PRIVATE src/main.c)
 
 add_subdirectory(memfault)
+
+add_subdirectory_ifdef(CONFIG_APP_SOIL_SENSOR src/modules/soil_sensor)

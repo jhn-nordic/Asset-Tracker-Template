@@ -12,6 +12,7 @@ config ATT_MODULES
 
 rsource "src/Kconfig.main"
 rsource "memfault/Kconfig.memfault"
+rsource "src/modules/soil_sensor/Kconfig.soil_sensor"
 
 endmenu
 
