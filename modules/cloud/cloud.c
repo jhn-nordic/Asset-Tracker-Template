@@ -21,6 +21,7 @@
 #include "cloud_internal.h"
 #include "cloud_configuration.h"
 #include "cloud_provisioning.h"
+#include "cloud_storage_sender.h"
 #ifdef CONFIG_APP_LOCATION
 #include "cloud_location.h"
 #endif /* CONFIG_APP_LOCATION */
@@ -468,8 +469,7 @@ static inline int attempt_timestamp_to_unix_ms(int64_t *uptime_ms)
 	return 0;
 }
 
-#if (defined(CONFIG_APP_POWER) || defined(CONFIG_APP_ENVIRONMENTAL))
-static int handle_data_timestamp(int64_t *timestamp_ms)
+int cloud_storage_timestamp_fixup(int64_t *timestamp_ms)
 {
 	int err;
 
@@ -504,76 +504,99 @@ static int handle_data_timestamp(int64_t *timestamp_ms)
 		return err;
 	}
 }
-#endif /* CONFIG_APP_POWER || CONFIG_APP_ENVIRONMENTAL */
+
+int cloud_json_message_send(const char *json)
+{
+	return nrf_cloud_coap_json_message_send(json, false,
+						IS_ENABLED(CONFIG_APP_CLOUD_CONFIRMABLE_MESSAGES));
+}
 
 /* Storage handling functions */
 
-static int send_storage_data_to_cloud(const struct storage_data_item *item)
+#if defined(CONFIG_APP_POWER)
+static int battery_send(const void *data, size_t len)
 {
 	int err;
-	int64_t timestamp_ms = NRF_CLOUD_NO_TIMESTAMP;
+	int64_t timestamp_ms;
+	const struct power_msg *power = data;
 	const bool confirmable = IS_ENABLED(CONFIG_APP_CLOUD_CONFIRMABLE_MESSAGES);
 
-#if defined(CONFIG_APP_POWER)
-	if (item->type == STORAGE_TYPE_BATTERY) {
-		const struct power_msg *power = &item->data.BATTERY;
+	/* Convert timestamp to unix time */
+	timestamp_ms = power->timestamp;
 
-		/* Convert timestamp to unix time */
-		timestamp_ms = power->timestamp;
-
-		err = handle_data_timestamp(&timestamp_ms);
-		if (err) {
-			return err;
-		}
-
-		err = nrf_cloud_coap_sensor_send(CUSTOM_JSON_APPID_VAL_BATTERY,
-						 power->percentage,
-						 timestamp_ms,
-						 confirmable);
-		if (err) {
-			LOG_ERR("Failed to send battery data to cloud, error: %d", err);
-			return err;
-		}
-
-		LOG_DBG("Battery data sent to cloud: %.1f%%", power->percentage);
-
-		/* Unused variable if no other sources compiled in */
-		(void)confirmable;
-
-		return 0;
+	err = cloud_storage_timestamp_fixup(&timestamp_ms);
+	if (err) {
+		return err;
 	}
+
+	err = nrf_cloud_coap_sensor_send(CUSTOM_JSON_APPID_VAL_BATTERY,
+					 power->percentage,
+					 timestamp_ms,
+					 confirmable);
+	if (err) {
+		LOG_ERR("Failed to send battery data to cloud, error: %d", err);
+		return err;
+	}
+
+	LOG_DBG("Battery data sent to cloud: %.1f%%", power->percentage);
+
+	return 0;
+}
+
+CLOUD_STORAGE_SENDER_DEFINE(STORAGE_TYPE_BATTERY, struct power_msg, battery_send);
 #endif /* CONFIG_APP_POWER */
 
 #if defined(CONFIG_APP_ENVIRONMENTAL)
-	if (item->type == STORAGE_TYPE_ENVIRONMENTAL) {
-		const struct environmental_msg *env = &item->data.ENVIRONMENTAL;
+static int environmental_send(const void *data, size_t len)
+{
+	int err;
+	int64_t timestamp_ms;
+	const struct environmental_msg *env = data;
+	const bool confirmable = IS_ENABLED(CONFIG_APP_CLOUD_CONFIRMABLE_MESSAGES);
 
-		/* Convert timestamp to unix time */
-		timestamp_ms = env->timestamp;
+	/* Convert timestamp to unix time */
+	timestamp_ms = env->timestamp;
 
-		err = handle_data_timestamp(&timestamp_ms);
-		if (err) {
-			return err;
-		}
-
-		return cloud_environmental_send(env, timestamp_ms, confirmable);
+	err = cloud_storage_timestamp_fixup(&timestamp_ms);
+	if (err) {
+		return err;
 	}
+
+	return cloud_environmental_send(env, timestamp_ms, confirmable);
+}
+
+CLOUD_STORAGE_SENDER_DEFINE(STORAGE_TYPE_ENVIRONMENTAL, struct environmental_msg,
+			    environmental_send);
 #endif /* CONFIG_APP_ENVIRONMENTAL */
 
 #if defined(CONFIG_APP_LOCATION)
-	if (item->type == STORAGE_TYPE_LOCATION) {
-		const struct location_msg *loc = &item->data.LOCATION;
+static int location_send(const void *data, size_t len)
+{
+	const struct location_msg *loc = data;
 
-		return cloud_location_handle_message(loc);
+	return cloud_location_handle_message(loc);
+}
+
+CLOUD_STORAGE_SENDER_DEFINE(STORAGE_TYPE_LOCATION, struct location_msg, location_send);
+#endif /* CONFIG_APP_LOCATION */
+
+static int send_storage_data_to_cloud(const struct storage_data_item *item)
+{
+	STRUCT_SECTION_FOREACH(cloud_storage_sender, sender) {
+		if (sender->type != item->type) {
+			continue;
+		}
+
+		if (item->data_len != sender->data_size) {
+			LOG_ERR("Storage data type %d has size %u, expected %zu",
+				item->type, item->data_len, sender->data_size);
+			return -EINVAL;
+		}
+
+		return sender->send(&item->data, item->data_len);
 	}
-#endif /* CONFIG_APP_LOCATION && CONFIG_LOCATION_METHOD_GNSS */
 
 	LOG_WRN("Unknown storage data type: %d", item->type);
-
-	/* Unused variables if no data sources are enabled */
-	(void)confirmable;
-	(void)timestamp_ms;
-	(void) err;
 
 	return -ENOTSUP;
 }
@@ -633,6 +656,7 @@ static void handle_storage_data(const struct storage_msg *msg)
 	}
 
 	item.type = msg->data_type;
+	item.data_len = msg->data_len;
 
 	memcpy(&item.data, msg->buffer, msg->data_len);
 
@@ -648,12 +672,10 @@ static void handle_cloud_channel_message(struct cloud_state_object const *state_
 {
 	int err;
 	const struct cloud_msg *msg = (const struct cloud_msg *)state_object->msg_buf;
-	const bool confirmable = IS_ENABLED(CONFIG_APP_CLOUD_CONFIRMABLE_MESSAGES);
 
 	switch (msg->type) {
 	case CLOUD_PAYLOAD_JSON:
-		err = nrf_cloud_coap_json_message_send(msg->payload.buffer,
-						       false, confirmable);
+		err = cloud_json_message_send(msg->payload.buffer);
 		if (err) {
 			LOG_ERR("nrf_cloud_coap_json_message_send, error: %d", err);
 			send_request_failed();

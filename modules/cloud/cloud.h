@@ -148,6 +148,31 @@ struct cloud_msg {
 
 #define UNIX_TIME_MS_2026_01_01 1767222000000LL
 
+/**
+ * @brief Send a JSON message to the cloud, the same way as CLOUD_PAYLOAD_JSON.
+ *
+ * Blocks until the message is sent. Call it only from a function registered with
+ * CLOUD_STORAGE_SENDER_DEFINE(), which runs in the cloud module thread.
+ *
+ * @param json NUL-terminated JSON message.
+ *
+ * @return 0 on success, negative errno on failure.
+ */
+int cloud_json_message_send(const char *json);
+
+/**
+ * @brief Convert the timestamp of a stored sample to unix time in milliseconds.
+ *
+ * Converts an uptime timestamp to unix time when the date and time are known. Otherwise it
+ * applies the policy selected by CONFIG_APP_CLOUD_HANDLE_WRONG_SAMPLE_TIMESTAMPS, which can
+ * set the timestamp to NRF_CLOUD_NO_TIMESTAMP.
+ *
+ * @param timestamp_ms Timestamp to convert, in uptime or unix time milliseconds.
+ *
+ * @return 0 if the timestamp can be sent, negative errno if the sample should not be sent.
+ */
+int cloud_storage_timestamp_fixup(int64_t *timestamp_ms);
+
 #ifdef __cplusplus
 }
 #endif
