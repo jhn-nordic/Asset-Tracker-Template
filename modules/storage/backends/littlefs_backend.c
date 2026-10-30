@@ -476,12 +476,15 @@ static int lfs_storage_init(void)
 	int num_types;
 	int ret;
 
-	/* Ensure we don't exceed configured maximum */
+	/* type_state[] has room for CONFIG_APP_STORAGE_MAX_TYPES, also when asserts are off */
 	STRUCT_SECTION_COUNT(storage_data, &num_types)
-	__ASSERT(num_types <= CONFIG_APP_STORAGE_MAX_TYPES,
-		 "Too many storage types registered (%d). "
-		 "Increase CONFIG_APP_STORAGE_MAX_TYPES.",
-		 num_types);
+	if (num_types > CONFIG_APP_STORAGE_MAX_TYPES) {
+		LOG_ERR("Too many storage types registered (%d). "
+			"Increase CONFIG_APP_STORAGE_MAX_TYPES.",
+			num_types);
+
+		return -ENOMEM;
+	}
 
 	ret = littlefs_mount(mountpoint);
 	if (ret < 0) {

@@ -9,6 +9,7 @@
 
 #include <zephyr/zbus/zbus.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/ring_buffer.h>
 
 #include "app_common.h"
 
@@ -227,6 +228,11 @@ struct storage_data {
 	 *             be cast to the appropriate data type internally.
 	 */
 	void (*extract_data)(const void *msg, void *data);
+
+#if defined(CONFIG_APP_STORAGE_BACKEND_RAM)
+	/* Ring buffer that holds the records of this data type */
+	struct ring_buf *ram_ring_buf;
+#endif
 };
 
 /**
@@ -235,7 +241,8 @@ struct storage_data {
  * This macro registers a new data type for storage, defining how to handle messages
  * from a specific zbus channel and how to store their data. It creates the necessary
  * helper functions, registers the type in an iterable section, and adds the storage
- * module as an observer of the channel.
+ * module as an observer of the channel. With the RAM backend, it also defines the ring
+ * buffer for CONFIG_APP_STORAGE_MAX_RECORDS_PER_TYPE records of the data type.
  *
  * The macro can be used in any file that is built into the application and includes
  * storage.h. Define or declare the check and extract functions before the macro.
@@ -289,6 +296,11 @@ struct storage_data {
 												\
 	ZBUS_CHAN_ADD_OBS(_chan, storage_subscriber, 0);					\
 												\
+	IF_ENABLED(CONFIG_APP_STORAGE_BACKEND_RAM,						\
+		   (RING_BUF_DECLARE(_name ## _ring_buf,					\
+				     sizeof(_data_type) *					\
+				     CONFIG_APP_STORAGE_MAX_RECORDS_PER_TYPE);))		\
+												\
 	/* The id in the symbol name makes duplicate ids fail to link, and the numeric	\
 	 * section sort orders the types by id.						\
 	 */											\
@@ -299,6 +311,8 @@ struct storage_data {
 		.data_size = sizeof(_data_type),						\
 		.should_store = _name ## _should_store,						\
 		.extract_data = _name ## _extract_data,						\
+		IF_ENABLED(CONFIG_APP_STORAGE_BACKEND_RAM,					\
+			   (.ram_ring_buf = &_name ## _ring_buf,))				\
 	};
 
 #endif /* _STORAGE_DATA_TYPES_H_ */

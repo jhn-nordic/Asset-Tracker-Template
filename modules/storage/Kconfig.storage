@@ -57,7 +57,8 @@ config APP_STORAGE_MAX_TYPES
 	default 3
 	help
 	  Maximum number of different data types that can be registered
-	  for storage. Each type requires memory for storing its records,
+	  for storage, including the data types that the application
+	  registers. Each type requires memory for storing its records,
 	  so this value affects RAM usage. Total RAM usage will be:
 	  MAX_TYPES * MAX_RECORDS_PER_TYPE * RECORD_SIZE bytes.
 
