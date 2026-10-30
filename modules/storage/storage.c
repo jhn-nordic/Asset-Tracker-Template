@@ -51,7 +51,7 @@ BUILD_ASSERT(CONFIG_APP_STORAGE_WATCHDOG_TIMEOUT_SECONDS >
  */
 
 /* Calculate maximum size needed for any message type */
-#define STORAGE_MSG_UNION_MEMBER(_name, _chan, _msg_type, ...) _msg_type _name##_msg_member;
+#define STORAGE_MSG_UNION_MEMBER(_name, _id, _chan, _msg_type, ...) _msg_type _name##_msg_member;
 
 #define STORAGE_MAX_MSG_SIZE_FROM_LIST(_DATA_SOURCE_LIST_LIST) \
 	sizeof(union {_DATA_SOURCE_LIST_LIST(STORAGE_MSG_UNION_MEMBER)})
@@ -81,13 +81,14 @@ BUILD_ASSERT(CONFIG_APP_STORAGE_WATCHDOG_TIMEOUT_SECONDS >
  * This process repeats for each enabled module in DATA_SOURCE_LIST.
  *
  * @param _n Name of the data type (unused in this macro)
+ * @param _id Storage type id (unused in this macro)
  * @param _chan Channel to add observer to (used to create ZBUS_CHAN_ADD_OBS)
  * @param _t Message type (unused in this macro)
  * @param _dt Data type to store (unused in this macro)
  * @param _c Check function (unused in this macro)
  * @param _e Extract function (unused in this macro)
  */
-#define ADD_OBSERVERS(_n, _chan, _t, _dt, _c, _e) ZBUS_CHAN_ADD_OBS(_chan, storage_subscriber, 0);
+#define ADD_OBSERVERS(_n, _id, _chan, _t, _dt, _c, _e) ZBUS_CHAN_ADD_OBS(_chan, storage_subscriber, 0);
 
 /* Private storage channel message types */
 enum priv_storage_msg_type {

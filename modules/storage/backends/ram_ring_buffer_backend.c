@@ -31,7 +31,7 @@ LOG_MODULE_DECLARE(storage, CONFIG_APP_STORAGE_LOG_LEVEL);
  * @param _cfn Check function parameter (unused in this macro)
  * @param _efn Extract function parameter (unused in this macro)
  */
-#define RAM_RING_BUF_ADD(_name, _c, _m, _data_type, _cfn, _efn)				\
+#define RAM_RING_BUF_ADD(_name, _id, _c, _m, _data_type, _cfn, _efn)				\
 	RING_BUF_DECLARE(_name ## _ring_buf, (sizeof(_data_type) * RECORDS_PER_TYPE));
 
 /**
@@ -52,7 +52,7 @@ LOG_MODULE_DECLARE(storage, CONFIG_APP_STORAGE_LOG_LEVEL);
  * @param _cfn Check function parameter (unused in this macro)
  * @param _efn Extract function parameter (unused in this macro)
  */
-#define RAM_RING_BUF_PTR(_name, _c, _m, _dt, _cfn, _efn)					\
+#define RAM_RING_BUF_PTR(_name, _id, _c, _m, _dt, _cfn, _efn)					\
 	&(_name ## _ring_buf),
 
 /* Declare ring buffers for each data type */
