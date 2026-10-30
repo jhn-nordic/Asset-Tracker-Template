@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
+if(NOT CONFIG_ATT_MODULES)
+	return()
+endif()
+
 zephyr_include_directories(common)
 
 # Modules include each other's headers even when the included module is disabled,

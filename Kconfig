@@ -4,7 +4,14 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
-menu "ATT modules"
+menuconfig ATT_MODULES
+	bool "ATT modules"
+	help
+	  Build the Asset Tracker Template modules into this image.
+	  Zephyr processes the module for every sysbuild image, so only the
+	  application image enables this option.
+
+if ATT_MODULES
 
 rsource "modules/power/Kconfig.power"
 rsource "modules/uart_power_control/Kconfig.uart_power_control"
@@ -22,4 +29,4 @@ module = APP
 module-str = APP
 source "subsys/logging/Kconfig.template.log_config"
 
-endmenu
+endif # ATT_MODULES

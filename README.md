@@ -38,5 +38,13 @@ manifest:
 ```
 
 Run `west update`.
-Zephyr finds `zephyr/module.yml`, adds the module sources to the `app` target, and adds the module menu to Kconfig.
+Zephyr finds `zephyr/module.yml` and processes the module for every sysbuild image, including MCUboot.
+The modules build only in images that enable `CONFIG_ATT_MODULES`.
+Enable it from the application's `Kconfig`, which the bootloader images do not source:
+
+```kconfig
+config ATT_MODULES
+	default y
+```
+
 The application's `CMakeLists.txt` adds only its own sources, for example `src/main.c`.
