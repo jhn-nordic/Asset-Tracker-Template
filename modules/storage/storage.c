@@ -43,53 +43,6 @@ ZBUS_MSG_SUBSCRIBER_DEFINE(storage_subscriber);
 BUILD_ASSERT(CONFIG_APP_STORAGE_WATCHDOG_TIMEOUT_SECONDS >
 	     CONFIG_APP_STORAGE_MSG_PROCESSING_TIMEOUT_SECONDS);
 
-/* Calculate the maximum message size from the list of channels */
-
-/* Create channel list from DATA_SOURCE_LIST.
- * This is used to calculate the maximum message size and to add observers.
- * The DATA_SOURCE_LIST macro is defined in `storage_data_types.h`.
- */
-
-/* Calculate maximum size needed for any message type */
-#define STORAGE_MSG_UNION_MEMBER(_name, _id, _chan, _msg_type, ...) _msg_type _name##_msg_member;
-
-#define STORAGE_MAX_MSG_SIZE_FROM_LIST(_DATA_SOURCE_LIST_LIST) \
-	sizeof(union {_DATA_SOURCE_LIST_LIST(STORAGE_MSG_UNION_MEMBER)})
-
-/* Use the larger of: largest message type or storage_msg struct */
-#define MAX_MSG_SIZE	MAX(STORAGE_MAX_MSG_SIZE_FROM_LIST(DATA_SOURCE_LIST), \
-			    sizeof(struct storage_msg))
-
-/**
- * @brief Add storage_subscriber as an observer to a channel
- *
- * This macro is used with DATA_SOURCE_LIST to add storage_subscriber as an observer
- * to each enabled channel. When DATA_SOURCE_LIST(ADD_OBSERVERS) is expanded, it:
- *
- * 1. Takes each enabled entry from DATA_SOURCE_LIST
- * 2. Passes the entry's parameters to this macro
- * 3. Creates a ZBUS_CHAN_ADD_OBS call using just the channel parameter
- *
- * For example, with CONFIG_APP_POWER enabled, the expansion looks like:
- *
- * Step 1: DATA_SOURCE_LIST expands to:
- *   ADD_OBSERVERS(battery, power_chan, struct power_msg, double, battery_check, battery_extract)
- *
- * Step 2: ADD_OBSERVERS expands to:
- *   ZBUS_CHAN_ADD_OBS(power_chan, storage_subscriber, 0)
- *
- * This process repeats for each enabled module in DATA_SOURCE_LIST.
- *
- * @param _n Name of the data type (unused in this macro)
- * @param _id Storage type id (unused in this macro)
- * @param _chan Channel to add observer to (used to create ZBUS_CHAN_ADD_OBS)
- * @param _t Message type (unused in this macro)
- * @param _dt Data type to store (unused in this macro)
- * @param _c Check function (unused in this macro)
- * @param _e Extract function (unused in this macro)
- */
-#define ADD_OBSERVERS(_n, _id, _chan, _t, _dt, _c, _e) ZBUS_CHAN_ADD_OBS(_chan, storage_subscriber, 0);
-
 /* Private storage channel message types */
 enum priv_storage_msg_type {
 	STORAGE_BATCH_SESSION_TIMEOUT,
@@ -98,11 +51,6 @@ enum priv_storage_msg_type {
 struct priv_storage_msg {
 	enum priv_storage_msg_type type;
 };
-
-/* Add storage_subscriber as observer to each enabled channel.
- * The data source list is defined in `storage_data_types.h`.
- */
-DATA_SOURCE_LIST(ADD_OBSERVERS);
 
 /* Create the storage channel */
 ZBUS_CHAN_DEFINE(storage_chan,
@@ -171,7 +119,7 @@ struct storage_state {
 	const struct zbus_channel *chan;
 
 	/* Last received message */
-	uint8_t msg_buf[MAX_MSG_SIZE];
+	uint8_t msg_buf[STORAGE_MAX_MSG_SIZE];
 
 	/* Current batch session state */
 	struct pipe_session current_session;
@@ -714,6 +662,7 @@ int storage_batch_read(struct storage_data_item *out_item, k_timeout_t timeout)
 
 	/* Fill output structure */
 	out_item->type = header.type;
+	out_item->data_len = header.data_size;
 
 	LOG_DBG("Read storage item: type=%u, size=%u", header.type, header.data_size);
 

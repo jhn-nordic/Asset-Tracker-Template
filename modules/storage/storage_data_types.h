@@ -42,21 +42,19 @@
  * - CONFIG_APP_ENVIRONMENTAL enables environmental data storage
  * - CONFIG_APP_LOCATION enables location data storage
  *
- * This macro is used in three ways:
+ * The list holds only the data types of this repository. An application registers its own
+ * data types by calling STORAGE_DATA_TYPE_ADD() directly.
  *
- * 1. With STORAGE_DATA_TYPE to register each data type:
- *    DATA_SOURCE_LIST(STORAGE_DATA_TYPE) expands to:
- *    STORAGE_DATA_TYPE(battery, power_chan, struct power_msg, double,
- *                     battery_check, battery_extract)
+ * This macro is used in two ways:
+ *
+ * 1. With STORAGE_DATA_TYPE_ADD to register each data type:
+ *    DATA_SOURCE_LIST(STORAGE_DATA_TYPE_ADD) expands to:
+ *    STORAGE_DATA_TYPE_ADD(BATTERY, STORAGE_TYPE_BATTERY, power_chan, struct power_msg,
+ *                          struct power_msg, battery_check, battery_extract)
  *    for each enabled module
  *
- * 2. With ADD_OBSERVERS to add storage_subscriber to each channel:
- *    DATA_SOURCE_LIST(ADD_OBSERVERS) expands to:
- *    ZBUS_CHAN_ADD_OBS(power_chan, storage_subscriber, 0)
- *    for each enabled module
- *
- * 3. With MAX_MSG_SIZE_FROM_LIST to calculate buffer sizes:
- *    Used to ensure message buffers are large enough for all message types
+ * 2. With STORAGE_MAX_DATA_SIZE_FROM_LIST and STORAGE_MAX_MSG_SIZE_FROM_LIST to calculate
+ *    buffer sizes for the built-in data and message types
  *
  * @param X Macro to apply to each entry in the list. Will be called as:
  *          X(name, id, channel, msg_type, data_type, check_fn, extract_fn)
@@ -88,12 +86,27 @@
 #define STORAGE_MAX_DATA_SIZE_FROM_LIST(_DATA_SOURCE_LIST_LIST) \
 	sizeof(union { _DATA_SOURCE_LIST_LIST(STORAGE_DATA_UNION_MEMBER) })
 
+/* Calculate the maximum message size from the list of channels */
+#define STORAGE_MSG_UNION_MEMBER(_name, _id, _chan, _msg_type, ...) _msg_type _name##_msg_member;
+
+#define STORAGE_MAX_MSG_SIZE_FROM_LIST(_DATA_SOURCE_LIST_LIST) \
+	sizeof(union {_DATA_SOURCE_LIST_LIST(STORAGE_MSG_UNION_MEMBER)})
+
+/* Evaluated here, because the size checks in STORAGE_DATA_TYPE_ADD() also run inside
+ * DATA_SOURCE_LIST(STORAGE_DATA_TYPE_ADD), where DATA_SOURCE_LIST cannot expand again.
+ */
+enum {
+	STORAGE_BUILTIN_MAX_DATA_SIZE = STORAGE_MAX_DATA_SIZE_FROM_LIST(DATA_SOURCE_LIST),
+	STORAGE_BUILTIN_MAX_MSG_SIZE = STORAGE_MAX_MSG_SIZE_FROM_LIST(DATA_SOURCE_LIST),
+};
+
 /**
  * @brief Maximum size in bytes of any data type that can be stored
  *
  * This macro calculates the maximum size in bytes among all data types that can be stored
  * by the storage module. It is computed at compile time by examining all data types defined
- * in the DATA_SOURCE_LIST macro and finding the largest one.
+ * in the DATA_SOURCE_LIST macro and finding the largest one. Data types registered outside
+ * this repository are covered by CONFIG_APP_STORAGE_EXT_MAX_DATA_SIZE.
  *
  * The calculation works as follows:
  * 1. DATA_SOURCE_LIST is expanded with STORAGE_DATA_UNION_MEMBER to create union members
@@ -124,7 +137,7 @@
  * The value is automatically updated when new data types are added to DATA_SOURCE_LIST
  * or when existing data types change size, ensuring the storage system remains consistent.
  */
-#define STORAGE_MAX_DATA_SIZE	STORAGE_MAX_DATA_SIZE_FROM_LIST(DATA_SOURCE_LIST)
+#define STORAGE_MAX_DATA_SIZE	MAX(STORAGE_BUILTIN_MAX_DATA_SIZE, CONFIG_APP_STORAGE_EXT_MAX_DATA_SIZE)
 
 /**
  * @brief Storage type ids of the data types registered by this repository.
@@ -159,10 +172,15 @@ enum storage_data_type {
  * DATA_SOURCE_LIST, this union will contain:
  *     double BATTERY;
  * The union is used to allocate enough space for any supported data type.
+ * The raw member gives access to data types registered outside this repository.
  */
 union storage_data_type_buf {
 	DATA_SOURCE_LIST(_STORAGE_DATA_TYPE_MEMBER)
+	uint8_t raw[STORAGE_MAX_DATA_SIZE];
 };
+
+/* Storage module subscriber, added as an observer by each STORAGE_DATA_TYPE_ADD() */
+ZBUS_OBS_DECLARE(storage_subscriber);
 
 /** @brief Structure to define a storage data type */
 struct storage_data {
@@ -216,7 +234,11 @@ struct storage_data {
  *
  * This macro registers a new data type for storage, defining how to handle messages
  * from a specific zbus channel and how to store their data. It creates the necessary
- * helper functions and registers the type in an iterable section.
+ * helper functions, registers the type in an iterable section, and adds the storage
+ * module as an observer of the channel.
+ *
+ * The macro can be used in any file that is built into the application and includes
+ * storage.h. Define or declare the check and extract functions before the macro.
  *
  * Example usage:
  * @code
@@ -241,6 +263,12 @@ struct storage_data {
 												\
 	BUILD_ASSERT((_id) > STORAGE_DATA_ALL && (_id) < STORAGE_DATA_TYPE_END,			\
 		     #_name ": storage type id must be between 2 and 254");			\
+	BUILD_ASSERT(sizeof(_data_type) <= STORAGE_MAX_DATA_SIZE,				\
+		     #_name ": data type too large, increase "					\
+		     "CONFIG_APP_STORAGE_EXT_MAX_DATA_SIZE");					\
+	BUILD_ASSERT(sizeof(_msg_type) <= STORAGE_MAX_MSG_SIZE,					\
+		     #_name ": message type too large, increase "				\
+		     "CONFIG_APP_STORAGE_EXT_MAX_MSG_SIZE");					\
 												\
 	extern bool _check_fn(const _msg_type * msg);						\
 	extern void _extract_fn(const _msg_type * msg, _data_type * data);			\
@@ -258,6 +286,8 @@ struct storage_data {
 												\
 		_extract_fn(m, (_data_type *)data);						\
 	}											\
+												\
+	ZBUS_CHAN_ADD_OBS(_chan, storage_subscriber, 0);					\
 												\
 	/* The id in the symbol name makes duplicate ids fail to link, and the numeric	\
 	 * section sort orders the types by id.						\

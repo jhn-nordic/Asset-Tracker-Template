@@ -76,6 +76,25 @@ config APP_STORAGE_MAX_RECORDS_PER_TYPE
 	  all enabled types at this record count; the backend checks at boot.
 	  See docs/modules/storage.md (Minimum partition size).
 
+config APP_STORAGE_EXT_MAX_DATA_SIZE
+	int "Largest data type registered outside this repository"
+	default 0
+	help
+	  Size in bytes of the largest data type that the application registers
+	  with STORAGE_DATA_TYPE_ADD(). The storage buffers are sized for the
+	  larger of this value and the largest built-in data type. Each
+	  registration fails to build if its data type does not fit.
+
+config APP_STORAGE_EXT_MAX_MSG_SIZE
+	int "Largest message type registered outside this repository"
+	default 0
+	help
+	  Size in bytes of the largest zbus message type that the application
+	  registers with STORAGE_DATA_TYPE_ADD(). The storage module receive
+	  buffer is sized for the larger of this value, the largest built-in
+	  message type, and struct storage_msg. Each registration fails to
+	  build if its message type does not fit.
+
 config APP_STORAGE_BATCH_BUFFER_SIZE
 	int "Storage batch buffer size in bytes"
 	default 512

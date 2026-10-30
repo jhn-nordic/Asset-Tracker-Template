@@ -125,18 +125,30 @@ struct storage_msg {
 };
 
 /**
+ * @brief Size in bytes of the storage module receive buffer
+ *
+ * The larger of the largest built-in message type, struct storage_msg, and
+ * CONFIG_APP_STORAGE_EXT_MAX_MSG_SIZE for message types registered outside this repository.
+ */
+#define STORAGE_MAX_MSG_SIZE	MAX(MAX(STORAGE_BUILTIN_MAX_MSG_SIZE, sizeof(struct storage_msg)),	\
+				    CONFIG_APP_STORAGE_EXT_MAX_MSG_SIZE)
+
+/**
  * @brief Structure to define a storage data item
  *
  * This structure is used to hold data items read from storage batch access.
  * No internal pointers or memory management required.
  */
 struct storage_data_item {
-	/* Type of data in the item.
-	 * See DATA_SOURCE_LIST in storage_data_types.h for the list of data types.
+	/* Storage type id of the data in the item.
+	 * See STORAGE_TYPE_BATTERY and the following ids in storage_data_types.h.
 	 */
 	enum storage_data_type type;
 
-	/* Inline data */
+	/* Length of the data in bytes */
+	uint16_t data_len;
+
+	/* Inline data. Data types registered outside this repository are in data.raw. */
 	union storage_data_type_buf data;
 };
 
